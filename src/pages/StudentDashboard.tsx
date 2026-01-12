@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { User, FileText, LogOut, BookOpen, Award, Calendar } from "lucide-react";
 import schoolLogo from "@/assets/school-logo.png";
+import studentPassport from "@/assets/student-passport.jpg";
 
 // Mock student data
 const studentData = {
@@ -126,12 +127,15 @@ const StudentDashboard = () => {
               {/* Profile Card */}
               <div className="md:col-span-2 card-elegant p-6">
                 <div className="flex items-center gap-4 mb-6 pb-6 border-b border-border">
-                  <div className="w-20 h-20 rounded-full bg-gradient-to-br from-secondary to-navy-light flex items-center justify-center text-secondary-foreground font-heading font-bold text-2xl">
-                    {studentData.name.split(" ").map(n => n[0]).join("")}
-                  </div>
+                  <img 
+                    src={studentPassport} 
+                    alt="Student Passport" 
+                    className="w-24 h-28 rounded-lg object-cover border-2 border-gold shadow-md"
+                  />
                   <div>
                     <h2 className="font-heading text-xl font-bold text-secondary">{studentData.name}</h2>
                     <p className="text-muted-foreground">{studentData.studentId}</p>
+                    <span className="inline-block mt-2 text-xs font-medium px-2 py-1 rounded-full bg-green-100 text-green-700">Active Student</span>
                   </div>
                 </div>
                 
