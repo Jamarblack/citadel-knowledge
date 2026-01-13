@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Users, FileEdit, LogOut, Save, Check } from "lucide-react";
 import schoolLogo from "@/assets/school-logo.png";
+import staffPassport from "@/assets/staff-passport.jpg";
 import { toast } from "sonner";
 
 // Mock classes data
@@ -103,9 +104,18 @@ const StaffDashboard = () => {
         </nav>
         
         <div className="p-4 rounded-xl bg-secondary-foreground/10 mb-6">
-          <p className="text-sm text-secondary-foreground/70 mb-1">Logged in as:</p>
-          <p className="font-semibold">Mrs. Adeyemi Grace</p>
-          <p className="text-xs text-secondary-foreground/60">Mathematics Teacher</p>
+          <div className="flex items-center gap-3 mb-3">
+            <img 
+              src={staffPassport} 
+              alt="Staff Passport" 
+              className="w-14 h-16 rounded-lg object-cover border-2 border-gold shadow-sm"
+            />
+            <div>
+              <p className="font-semibold text-sm">Mrs. Adeyemi Grace</p>
+              <p className="text-xs text-secondary-foreground/60">Mathematics Teacher</p>
+            </div>
+          </div>
+          <span className="inline-block text-xs font-medium px-2 py-1 rounded-full bg-gold/20 text-gold">Staff ID: STF/2018/042</span>
         </div>
         
         <button 
