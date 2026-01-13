@@ -2,11 +2,11 @@ import { Award, Target, Heart, Shield } from "lucide-react";
 
 const AboutSection = () => {
   const values = [
-    {
-      icon: Award,
-      title: "Academic Excellence",
-      description: "We maintain the highest standards of academic rigor, preparing students for success in higher education and beyond."
-    },
+    // {
+    //   icon: Award,
+    //   title: "Academic Excellence",
+    //   description: "We maintain the highest standards of academic rigor, preparing students for success in higher education and beyond."
+    // },
     {
       icon: Target,
       title: "Holistic Development",

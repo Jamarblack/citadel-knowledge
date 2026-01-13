@@ -15,7 +15,7 @@ const HeroSection = () => {
         <div className="text-center text-secondary-foreground max-w-4xl mx-auto">
           <div className="animate-fade-in" style={{ animationDelay: '0.1s' }}>
             <span className="inline-block px-4 py-2 rounded-full bg-gold/20 text-gold font-medium text-sm mb-6">
-              Excellence in Education Since 1995
+             
             </span>
           </div>
           
@@ -29,7 +29,7 @@ const HeroSection = () => {
           </p>
           
           <p className="text-lg text-gold italic font-heading mb-10 animate-fade-in" style={{ animationDelay: '0.4s' }}>
-            "Education for Future Excellence"
+            ""
           </p>
           
           <div className="flex flex-col sm:flex-row gap-4 justify-center mb-16 animate-fade-in" style={{ animationDelay: '0.5s' }}>
@@ -43,7 +43,7 @@ const HeroSection = () => {
           </div>
           
           {/* Stats Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-3xl mx-auto animate-fade-in" style={{ animationDelay: '0.6s' }}>
+          {/* <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-3xl mx-auto animate-fade-in" style={{ animationDelay: '0.6s' }}>
             <div className="bg-secondary-foreground/10 backdrop-blur-sm rounded-xl p-6 border border-secondary-foreground/20">
               <BookOpen size={36} className="text-gold mx-auto mb-3" />
               <h3 className="font-heading text-2xl font-bold text-secondary-foreground">25+</h3>
@@ -59,7 +59,7 @@ const HeroSection = () => {
               <h3 className="font-heading text-2xl font-bold text-secondary-foreground">98%</h3>
               <p className="text-secondary-foreground/70">Success Rate</p>
             </div>
-          </div>
+          </div> */}
         </div>
       </div>
       
