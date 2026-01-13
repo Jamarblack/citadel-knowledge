@@ -59,14 +59,14 @@ const AboutSection = () => {
               <div className="aspect-video rounded-lg overflow-hidden bg-muted flex items-center justify-center">
                 <div className="text-center p-8">
                   <div className="w-24 h-24 mx-auto mb-4 rounded-full bg-gradient-to-br from-primary to-crimson-dark flex items-center justify-center">
-                    <Award size={48} className="text-primary-foreground" />
+                    {/* <Award size={48} className="text-primary-foreground" /> */}
                   </div>
-                  <h4 className="font-heading text-xl font-semibold text-secondary mb-2">
+                  {/* <h4 className="font-heading text-xl font-semibold text-secondary mb-2">
                     Award-Winning Institution
                   </h4>
                   <p className="text-muted-foreground text-sm">
                     Recognized for excellence in education by the Ministry of Education
-                  </p>
+                  </p> */}
                 </div>
               </div>
             </div>
