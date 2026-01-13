@@ -8,17 +8,17 @@ const AboutSection = () => {
     //   description: "We maintain the highest standards of academic rigor, preparing students for success in higher education and beyond."
     // },
     {
-      icon: Target,
+      
       title: "Holistic Development",
       description: "Beyond academics, we nurture creativity, leadership, and character in every student."
     },
     {
-      icon: Heart,
+      
       title: "Student-Centered Care",
       description: "Every child is unique. Our dedicated staff provides personalized attention and support."
     },
     {
-      icon: Shield,
+      
       title: "Safe Environment",
       description: "We provide a secure, inclusive campus where students can learn, grow, and thrive."
     }
@@ -33,7 +33,7 @@ const AboutSection = () => {
           </span>
           <h2 className="section-heading">Building Tomorrow's Leaders</h2>
           <p className="text-muted-foreground max-w-2xl mx-auto text-lg">
-            Since 1995, Citadel of Knowledge International School has been a beacon of academic excellence, 
+             Citadel of Knowledge International School has been a beacon of academic excellence, 
             nurturing young minds and shaping future leaders.
           </p>
         </div>
@@ -83,7 +83,7 @@ const AboutSection = () => {
               style={{ animationDelay: `${index * 0.1}s` }}
             >
               <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-primary to-crimson-dark flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300">
-                <value.icon size={28} className="text-primary-foreground" />
+                {/* <value.icon size={28} className="text-primary-foreground" /> */}
               </div>
               <h4 className="font-heading text-lg font-semibold text-secondary mb-2">{value.title}</h4>
               <p className="text-muted-foreground text-sm">{value.description}</p>
