@@ -1,115 +1,102 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { UserCog, Mail, Lock, ArrowLeft } from "lucide-react";
-import { Link } from "react-router-dom";
-import schoolLogo from "@/assets/school-logo.png";
+import { toast } from "sonner";
+import { supabase } from "@/lib/supabase";
+import schoolLogo from "/school-logo.png";
+import { Eye, EyeOff, Loader2 } from "lucide-react";
+import SEO from "@/components/SEO";
 
 const StaffLogin = () => {
   const navigate = useNavigate();
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [formData, setFormData] = useState({ email: '', password: '' });
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Mock authentication - accept any input
-    if (email && password) {
-      navigate("/staff-dashboard");
-    } else {
-      setError("Please enter your Email and Password");
+    setLoading(true);
+
+    try {
+      const { data, error } = await supabase
+        .from('staff')
+        .select('*')
+        .eq('email', formData.email)
+        .eq('password_text', formData.password)
+        .single();
+
+      if (error || !data) throw new Error('Invalid email or PIN');
+
+      // Save Session
+      localStorage.setItem('staffId', data.id);
+      localStorage.setItem('staffRole', data.role);
+
+      toast.success(`Welcome, ${data.full_name}`);
+
+      // ROUTING LOGIC (The new separation)
+      switch (data.role) {
+        case 'Proprietor':
+          navigate('/proprietor-dashboard');
+          break;
+        case 'Principal':
+          navigate('/principal-dashboard');
+          break;
+        case 'Head Teacher':
+          navigate('/head-teacher-dashboard');
+          break;
+        case 'Teacher':
+          navigate('/teacher-dashboard');
+          break;
+        case 'Bursar':
+          navigate('/bursar-dashboard'); // Future proofing
+          break;
+        default:
+          navigate('/teacher-dashboard'); // Default fallback
+      }
+
+    } catch (error: any) {
+      toast.error(error.message);
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen flex" style={{ background: 'var(--gradient-hero)' }}>
-      {/* Left Panel - Branding */}
-      <div className="hidden lg:flex lg:w-1/2 flex-col justify-center items-center p-12 text-secondary-foreground">
-        <img src={schoolLogo} alt="School Logo" className="w-32 h-32 mb-8 animate-scale-in" />
-        <h1 className="font-heading text-4xl font-bold mb-4 text-center">Staff Portal</h1>
-        <p className="text-xl text-secondary-foreground/80 text-center max-w-md">
-          Manage student records, enter grades, and access administrative resources.
-        </p>
-        <div className="mt-12 p-6 rounded-xl bg-secondary-foreground/10 backdrop-blur-sm border border-secondary-foreground/20 max-w-sm">
-          <p className="italic text-secondary-foreground/90 text-center">
-            "Education for Future Excellence"
-          </p>
-        </div>
-      </div>
-      
-      {/* Right Panel - Login Form */}
-      <div className="w-full lg:w-1/2 flex items-center justify-center p-8 bg-background">
-        <div className="w-full max-w-md">
-          <Link to="/" className="inline-flex items-center gap-2 text-muted-foreground hover:text-primary transition-colors mb-8">
-            <ArrowLeft size={18} />
-            Back to Home
-          </Link>
-          
-          <div className="lg:hidden flex flex-col items-center mb-8">
-            <img src={schoolLogo} alt="School Logo" className="w-20 h-20 mb-4" />
+    <div className="min-h-screen flex items-center justify-center bg-[#f8f5f2] p-4">
+      <SEO 
+        title="Citadel School of Excellence | Best School in Oko Erin, Kwara"
+        description="Enroll at Citadel School, the leading primary and secondary school in Oko Erin, Kwara State. We offer world-class education, modern facilities, and a moral foundation for your child."
+      />
+      <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-md border border-[#d4af37]/20">
+        <div className="flex flex-col items-center mb-8">
+          <div className="h-20 w-20 bg-[#2c0a0e] rounded-full flex items-center justify-center border-4 border-[#d4af37] shadow-lg mb-4">
+             <img src={schoolLogo} alt="Logo" className="w-15 h-15 rounded-full" />
           </div>
-          
-          <div className="card-elegant p-8">
-            <div className="flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-primary to-crimson-dark mx-auto mb-6">
-              <UserCog size={32} className="text-primary-foreground" />
-            </div>
-            
-            <h2 className="font-heading text-2xl font-bold text-secondary text-center mb-2">
-              Staff Login
-            </h2>
-            <p className="text-muted-foreground text-center mb-8">
-              Enter your credentials to access the admin portal
-            </p>
-            
-            {error && (
-              <div className="bg-destructive/10 text-destructive text-sm p-3 rounded-lg mb-6 text-center">
-                {error}
-              </div>
-            )}
-            
-            <form onSubmit={handleLogin} className="space-y-5">
-              <div>
-                <label className="block text-sm font-medium text-foreground mb-2">Email Address</label>
-                <div className="relative">
-                  <Mail size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                  <input
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="Enter your email"
-                    className="input-field pl-11"
-                  />
-                </div>
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-foreground mb-2">Password</label>
-                <div className="relative">
-                  <Lock size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                  <input
-                    type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="Enter your password"
-                    className="input-field pl-11"
-                  />
-                </div>
-              </div>
-              
-              <button type="submit" className="btn-hero w-full">
-                Login to Portal
+          <h2 className="text-2xl font-serif font-bold text-[#2c0a0e]">Staff Portal</h2>
+          <p className="text-sm text-gray-500">Sign in to access your dashboard</p>
+        </div>
+
+        <form onSubmit={handleLogin} className="space-y-5">
+          <div className="space-y-2">
+            <label className="text-sm font-bold text-[#2c0a0e] ml-1">Email Address</label>
+            <input required type="email" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})}
+              className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl focus:border-[#d4af37] focus:ring-1 focus:ring-[#d4af37] outline-none" placeholder="staff@citadel.com" />
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-sm font-bold text-[#2c0a0e] ml-1">Password PIN</label>
+            <div className="relative">
+              <input required type={showPassword ? "text" : "password"} value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})}
+                className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl focus:border-[#d4af37] focus:ring-1 focus:ring-[#d4af37] outline-none pr-12" placeholder="••••" />
+              <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-[#2c0a0e] p-1">
+                {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
               </button>
-            </form>
-            
-            <p className="text-muted-foreground text-sm text-center mt-6">
-              Having trouble?{" "}
-              <a href="#" className="text-primary hover:underline">Contact IT Support</a>
-            </p>
+            </div>
           </div>
-          
-          <p className="text-muted-foreground text-xs text-center mt-6">
-            Demo: Enter any Email and Password to login
-          </p>
-        </div>
+
+          <button disabled={loading} className="w-full py-4 bg-[#2c0a0e] text-[#fcf6ba] font-bold rounded-xl shadow-lg hover:bg-[#540b0e] transition-all flex items-center justify-center gap-2">
+            {loading ? <><Loader2 size={20} className="animate-spin" /> Verifying...</> : 'Sign In'}
+          </button>
+        </form>
       </div>
     </div>
   );

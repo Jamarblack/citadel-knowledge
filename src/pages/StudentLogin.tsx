@@ -2,7 +2,8 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { GraduationCap, User, Lock, ArrowLeft } from "lucide-react";
 import { Link } from "react-router-dom";
-import schoolLogo from "@/assets/school-logo.png";
+import schoolLogo from "/school-logo.png";
+import SEO from "@/components/SEO";
 
 const StudentLogin = () => {
   const navigate = useNavigate();
@@ -22,6 +23,10 @@ const StudentLogin = () => {
 
   return (
     <div className="min-h-screen flex" style={{ background: 'var(--gradient-hero)' }}>
+      <SEO 
+        title="Citadel School of Excellence | Best School in Oko Erin, Kwara"
+        description="Enroll at Citadel School, the leading primary and secondary school in Oko Erin, Kwara State. We offer world-class education, modern facilities, and a moral foundation for your child."
+      />
       {/* Left Panel - Branding */}
       <div className="hidden lg:flex lg:w-1/2 flex-col justify-center items-center p-12 text-secondary-foreground">
         <img src={schoolLogo} alt="School Logo" className="w-32 h-32 mb-8 animate-scale-in" />

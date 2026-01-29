@@ -1,34 +1,34 @@
-import { Toaster } from "@/components/ui/toaster";
-import { Toaster as Sonner } from "@/components/ui/sonner";
-import { TooltipProvider } from "@/components/ui/tooltip";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
-import Index from "./pages/Index";
-import StudentLogin from "./pages/StudentLogin";
-import StaffLogin from "./pages/StaffLogin";
-import StudentDashboard from "./pages/StudentDashboard";
-import StaffDashboard from "./pages/StaffDashboard";
-import NotFound from "./pages/NotFound";
+import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
+import { Toaster } from "sonner";
+// Import Pages
+import LandingPage from "@/pages/LandingPage"; // <--- Import the new page
+import StaffLogin from "@/pages/StaffLogin";
+import ProprietorDashboard from "@/pages/ProprietorDashboard";
+import TeacherDashboard from "@/pages/TeacherDashboard";
+import PrincipalDashboard from "@/pages/PrincipalDashboard";
+import HeadTeacherDashboard from "@/pages/HeadTeacherDashboard";
+import NotFound from "@/pages/NotFound";
 
-const queryClient = new QueryClient();
+function App() {
+  return (
+    <Router>
+      <Routes>
+        {/* Public Routes */}
+        <Route path="/" element={<LandingPage />} />  {/* <--- Default is now Landing Page */}
+        <Route path="/staff-login" element={<StaffLogin />} />
 
-const App = () => (
-  <QueryClientProvider client={queryClient}>
-    <TooltipProvider>
-      <Toaster />
-      <Sonner />
-      <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<Index />} />
-          <Route path="/student-login" element={<StudentLogin />} />
-          <Route path="/staff-login" element={<StaffLogin />} />
-          <Route path="/student-dashboard" element={<StudentDashboard />} />
-          <Route path="/staff-dashboard" element={<StaffDashboard />} />
-          <Route path="*" element={<NotFound />} />
-        </Routes>
-      </BrowserRouter>
-    </TooltipProvider>
-  </QueryClientProvider>
-);
+        {/* Protected Dashboard Routes */}
+        <Route path="/proprietor-dashboard" element={<ProprietorDashboard />} />
+        <Route path="/teacher-dashboard" element={<TeacherDashboard />} />
+        <Route path="/principal-dashboard" element={<PrincipalDashboard />} />
+        <Route path="/head-teacher-dashboard" element={<HeadTeacherDashboard />} />
+
+        {/* 404 Route */}
+        <Route path="*" element={<NotFound />} />
+      </Routes>
+      <Toaster position="top-right" />
+    </Router>
+  );
+}
 
 export default App;

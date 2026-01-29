@@ -1,310 +1,383 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Users, FileEdit, LogOut, Save, Check } from "lucide-react";
-import schoolLogo from "@/assets/school-logo.png";
-import staffPassport from "@/assets/staff-passport.jpg";
+import { 
+  LogOut, User, BookOpen, Save, Users, Layers, ClipboardCheck 
+} from "lucide-react";
 import { toast } from "sonner";
-
-// Mock classes data
-const classesData = [
-  { id: "jss1", name: "JSS 1" },
-  { id: "jss2", name: "JSS 2" },
-  { id: "jss3", name: "JSS 3" },
-  { id: "ss1", name: "SS 1 (Science)" },
-  { id: "ss2", name: "SS 2 (Science)" },
-  { id: "ss3", name: "SS 3 (Science)" },
-];
-
-// Mock students with editable scores
-const initialStudents = [
-  { id: 1, name: "Adebayo Oluwaseun", ca1: 18, ca2: 17, exam: 52 },
-  { id: 2, name: "Chukwu Chiamaka", ca1: 15, ca2: 16, exam: 48 },
-  { id: 3, name: "Ibrahim Fatima", ca1: 19, ca2: 18, exam: 55 },
-  { id: 4, name: "Okonkwo Chidera", ca1: 14, ca2: 15, exam: 42 },
-  { id: 5, name: "Bello Aisha", ca1: 17, ca2: 18, exam: 50 },
-  { id: 6, name: "Eze Emmanuel", ca1: 16, ca2: 17, exam: 46 },
-  { id: 7, name: "Adeleke Toluwani", ca1: 20, ca2: 19, exam: 58 },
-  { id: 8, name: "Musa Abdullahi", ca1: 13, ca2: 14, exam: 38 },
-];
-
-type Student = typeof initialStudents[0];
+import { supabase } from "@/lib/supabase";
+import schoolLogo from "/school-logo.png";
 
 const StaffDashboard = () => {
   const navigate = useNavigate();
-  const [selectedClass, setSelectedClass] = useState("");
-  const [selectedSubject, setSelectedSubject] = useState("Mathematics");
-  const [students, setStudents] = useState<Student[]>(initialStudents);
-  const [isSaving, setIsSaving] = useState(false);
-
-  const handleLogout = () => {
-    navigate("/");
-  };
-
-  const handleScoreChange = (studentId: number, field: "ca1" | "ca2" | "exam", value: string) => {
-    const numValue = parseInt(value) || 0;
-    const maxValue = field === "exam" ? 60 : 20;
-    const clampedValue = Math.min(Math.max(0, numValue), maxValue);
-    
-    setStudents(prev => 
-      prev.map(s => s.id === studentId ? { ...s, [field]: clampedValue } : s)
-    );
-  };
-
-  const handleSave = () => {
-    setIsSaving(true);
-    setTimeout(() => {
-      setIsSaving(false);
-      toast.success("Results saved successfully!", {
-        description: `${selectedSubject} scores for ${classesData.find(c => c.id === selectedClass)?.name} have been updated.`
-      });
-    }, 1000);
-  };
-
-  const getTotal = (student: Student) => student.ca1 + student.ca2 + student.exam;
+  const [activeTab, setActiveTab] = useState("profile");
+  const [loading, setLoading] = useState(false);
   
-  const getGrade = (total: number) => {
-    if (total >= 75) return "A";
-    if (total >= 65) return "B";
-    if (total >= 55) return "C";
-    if (total >= 45) return "D";
-    return "F";
+  // Logged-in Teacher's Profile
+  const [teacherProfile, setTeacherProfile] = useState<any>(null);
+
+  // INPUT RESULT STATE
+  const [selectedClass, setSelectedClass] = useState("");
+  const [selectedDepartment, setSelectedDepartment] = useState("");
+  const [selectedSubject, setSelectedSubject] = useState("");
+  const [resultStudents, setResultStudents] = useState<any[]>([]);
+  const [subjects, setSubjects] = useState<any[]>([]);
+  const [filteredSubjects, setFilteredSubjects] = useState<any[]>([]);
+  const [scores, setScores] = useState<Record<string, { ca: number, exam: number }>>({});
+
+  // MY CLASS STATE
+  const [myClassStudents, setMyClassStudents] = useState<any[]>([]);
+
+  useEffect(() => {
+    // 1. Get the current user
+    // Note: In a real app with Auth, use supabase.auth.getUser()
+    // For this manual setup, we fetch the teacher based on the email stored in localStorage
+    // OR for demo purposes, we fetch the last created 'Teacher' if no session exists.
+    fetchTeacherProfile();
+    fetchSubjects();
+  }, []);
+
+  useEffect(() => {
+    if (teacherProfile?.assigned_class) {
+      fetchMyClassStudents();
+    }
+  }, [teacherProfile]);
+
+  useEffect(() => {
+    filterSubjects();
+  }, [selectedClass, selectedDepartment, subjects]);
+
+  const fetchTeacherProfile = async () => {
+    // Ideally, retrieve email from login session. 
+    // Demo: Fetching a 'Teacher' role for demonstration.
+    // REPLACE THIS with actual session logic if you have implemented auth context.
+    const { data } = await supabase.from('staff').select('*').eq('role', 'Teacher').limit(1).single();
+    if (data) setTeacherProfile(data);
   };
 
-  const getGradeColor = (grade: string) => {
-    switch (grade) {
-      case "A": return "text-green-600 bg-green-100";
-      case "B": return "text-blue-600 bg-blue-100";
-      case "C": return "text-yellow-600 bg-yellow-100";
-      case "D": return "text-orange-600 bg-orange-100";
-      default: return "text-red-600 bg-red-100";
+  const fetchSubjects = async () => {
+    const { data } = await supabase.from('subjects').select('*').order('name');
+    if (data) setSubjects(data || []);
+  };
+
+  const fetchMyClassStudents = async () => {
+    if (!teacherProfile?.assigned_class) return;
+    const { data } = await supabase
+      .from('students')
+      .select('*')
+      .eq('current_class', teacherProfile.assigned_class)
+      .order('full_name');
+    setMyClassStudents(data || []);
+  };
+
+  // --- LOGIC: Filter Classes based on Teacher's Section ---
+  const getAllowedClasses = () => {
+    if (!teacherProfile?.section) return [];
+    
+    if (teacherProfile.section === 'Primary') {
+      return ['Creche', 'KG 1', 'KG 2', 'KG 3', 'Pry 1', 'Pry 2', 'Pry 3', 'Pry 4', 'Pry 5'];
+    }
+    if (teacherProfile.section === 'Secondary') {
+      return ['JSS 1', 'JSS 2', 'JSS 3', 'SS 1', 'SS 2', 'SS 3'];
+    }
+    return [];
+  };
+
+  // --- LOGIC: Filter Subjects (Same as before) ---
+  const filterSubjects = () => {
+    if (!selectedClass) { setFilteredSubjects([]); return; }
+
+    let sectionTag = "";
+    if (selectedClass.includes('KG')) sectionTag = selectedClass.replace(' ', ''); // KG1, KG2...
+    else if (['Pry 1', 'Pry 2'].includes(selectedClass)) sectionTag = 'PRY_1_2';
+    else if (['Pry 3', 'Pry 4'].includes(selectedClass)) sectionTag = 'PRY_3_4';
+    else if (selectedClass === 'Pry 5') sectionTag = 'PRY_5';
+    else if (selectedClass.includes('JSS')) sectionTag = 'JUNIOR';
+    else if (selectedClass.includes('SS')) {
+      if (selectedDepartment === 'Science') sectionTag = 'SENIOR_SCI';
+      else if (selectedDepartment === 'Art') sectionTag = 'SENIOR_ART';
+      else if (selectedDepartment === 'Commercial') sectionTag = 'SENIOR_COM';
+    }
+
+    if (sectionTag) {
+      setFilteredSubjects(subjects.filter(s => s.section === sectionTag));
+    } else {
+      setFilteredSubjects([]);
     }
   };
 
+  const loadResultSheet = async () => {
+    if (!selectedClass || !selectedSubject) return;
+    setLoading(true);
+    try {
+      const { data: students } = await supabase.from('students').select('*').eq('current_class', selectedClass).order('full_name');
+      const { data: results } = await supabase.from('results')
+        .select('*')
+        .eq('class_name', selectedClass)
+        .eq('subject', selectedSubject);
+
+      const scoreMap: any = {};
+      results?.forEach((r: any) => {
+        scoreMap[r.student_id] = { ca: r.ca_score, exam: r.exam_score };
+      });
+
+      setResultStudents(students || []);
+      setScores(scoreMap);
+    } catch (err) {
+      toast.error("Failed to load data");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const saveScore = async (student: any) => {
+    const scoreData = scores[student.id] || { ca: 0, exam: 0 };
+    
+    try {
+      const { error } = await supabase.from('results').upsert({
+        student_id: student.id,
+        student_name: student.full_name,
+        admission_number: student.admission_number,
+        subject: selectedSubject,
+        class_name: selectedClass,
+        term: '1st Term', // Should come from global settings
+        session: '2025/2026', // Should come from global settings
+        ca_score: scoreData.ca,
+        exam_score: scoreData.exam,
+        status: 'pending', // <--- IMPORTANT: Default to Pending
+        uploader_name: teacherProfile.full_name, // <--- Security Tracking
+        uploader_id: teacherProfile.id
+      }, { onConflict: 'student_id, subject, term, session' });
+
+      if (error) throw error;
+      toast.success("Score saved! Sent for approval.");
+    } catch (error: any) {
+      toast.error("Save failed");
+    }
+  };
+
+  const handleScoreChange = (id: string, type: 'ca' | 'exam', val: string) => {
+    const num = Math.min(type === 'ca' ? 40 : 60, Math.max(0, Number(val) || 0));
+    setScores(prev => ({
+      ...prev,
+      [id]: { ...prev[id], [type]: num, [type === 'ca' ? 'exam' : 'ca']: prev[id]?.[type === 'ca' ? 'exam' : 'ca'] || 0 }
+    }));
+  };
+
   return (
-    <div className="min-h-screen bg-background">
-      {/* Sidebar */}
-      <aside className="fixed left-0 top-0 bottom-0 w-64 bg-secondary text-secondary-foreground p-6 hidden lg:flex flex-col">
-        <div className="flex items-center gap-3 mb-10">
-          <img src={schoolLogo} alt="Logo" className="w-12 h-12" />
-          <div>
-            <h1 className="font-heading font-bold text-sm">Citadel of Knowledge</h1>
-            <p className="text-xs text-secondary-foreground/70">Staff Portal</p>
-          </div>
+    <div className="min-h-screen bg-[#f8f5f2] font-sans">
+      {/* Header */}
+      <header className="bg-white border-b border-[#2c0a0e]/10 px-6 py-4 flex justify-between items-center sticky top-0 z-20 shadow-sm">
+        <div className="flex items-center gap-3">
+           <img src={schoolLogo} className="w-10 h-10" alt="Logo" />
+           <div>
+             <h1 className="font-serif font-bold text-xl text-[#2c0a0e]">Staff Portal</h1>
+             <p className="text-xs text-gray-500">{teacherProfile?.full_name} | {teacherProfile?.section} Section</p>
+           </div>
         </div>
-        
-        <nav className="flex-1 space-y-2">
-          <button className="w-full flex items-center gap-3 px-4 py-3 rounded-lg bg-gold text-secondary font-semibold">
-            <FileEdit size={20} />
-            Record Results
-          </button>
-          <button className="w-full flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-secondary-foreground/10 transition-colors">
-            <Users size={20} />
-            Manage Students
-          </button>
-        </nav>
-        
-        <div className="p-4 rounded-xl bg-secondary-foreground/10 mb-6">
-          <div className="flex items-center gap-3 mb-3">
-            <img 
-              src={staffPassport} 
-              alt="Staff Passport" 
-              className="w-14 h-16 rounded-lg object-cover border-2 border-gold shadow-sm"
-            />
-            <div>
-              <p className="font-semibold text-sm">Mrs. Adeyemi Grace</p>
-              <p className="text-xs text-secondary-foreground/60">Mathematics Teacher</p>
-            </div>
-          </div>
-          <span className="inline-block text-xs font-medium px-2 py-1 rounded-full bg-gold/20 text-gold">Staff ID: STF/2018/042</span>
-        </div>
-        
-        <button 
-          onClick={handleLogout}
-          className="flex items-center gap-3 px-4 py-3 rounded-lg text-secondary-foreground/70 hover:bg-destructive/20 hover:text-destructive transition-colors"
-        >
-          <LogOut size={20} />
-          Logout
+        <button onClick={() => navigate("/")} className="text-sm font-bold text-[#540b0e] flex items-center gap-2 hover:bg-[#540b0e]/10 px-4 py-2 rounded-full transition-all">
+          <LogOut size={16} /> Sign Out
         </button>
-      </aside>
-      
-      {/* Mobile Header */}
-      <header className="lg:hidden fixed top-0 left-0 right-0 bg-secondary text-secondary-foreground p-4 z-50">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <img src={schoolLogo} alt="Logo" className="w-10 h-10" />
-            <span className="font-heading font-bold text-sm">Staff Portal</span>
-          </div>
-          <button onClick={handleLogout} className="p-2 hover:bg-secondary-foreground/10 rounded-lg">
-            <LogOut size={20} />
-          </button>
-        </div>
       </header>
-      
-      {/* Main Content */}
-      <main className="lg:ml-64 pt-20 lg:pt-8 p-6">
-        <div className="max-w-6xl mx-auto">
-          {/* Header */}
-          <div className="mb-8">
-            <h1 className="font-heading text-3xl font-bold text-secondary mb-2">
-              Record Student Results
-            </h1>
-            <p className="text-muted-foreground">
-              Select a class and subject to enter or update student scores
-            </p>
-          </div>
-          
-          {/* Filters */}
-          <div className="card-elegant p-6 mb-6">
-            <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-foreground mb-2">Academic Session</label>
-                <select className="input-field">
-                  <option>2024/2025</option>
-                  <option>2023/2024</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-foreground mb-2">Term</label>
-                <select className="input-field">
-                  <option>Second Term</option>
-                  <option>First Term</option>
-                  <option>Third Term</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-foreground mb-2">Class</label>
-                <select 
-                  className="input-field"
-                  value={selectedClass}
-                  onChange={(e) => setSelectedClass(e.target.value)}
-                >
-                  <option value="">Select Class</option>
-                  {classesData.map(c => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-foreground mb-2">Subject</label>
-                <select 
-                  className="input-field"
-                  value={selectedSubject}
-                  onChange={(e) => setSelectedSubject(e.target.value)}
-                >
-                  <option>Mathematics</option>
-                  <option>English Language</option>
-                  <option>Physics</option>
-                  <option>Chemistry</option>
-                  <option>Biology</option>
-                </select>
-              </div>
-            </div>
-          </div>
-          
-          {/* Results Table */}
-          {selectedClass ? (
-            <div className="card-elegant overflow-hidden animate-fade-in">
-              <div className="p-4 bg-muted border-b border-border flex flex-wrap items-center justify-between gap-4">
-                <div>
-                  <h3 className="font-heading font-semibold text-secondary">
-                    {classesData.find(c => c.id === selectedClass)?.name} - {selectedSubject}
-                  </h3>
-                  <p className="text-sm text-muted-foreground">{students.length} students</p>
-                </div>
-                <button
-                  onClick={handleSave}
-                  disabled={isSaving}
-                  className="btn-hero inline-flex items-center gap-2 py-2 px-6 disabled:opacity-50"
-                >
-                  {isSaving ? (
-                    <>Saving...</>
-                  ) : (
-                    <>
-                      <Save size={18} />
-                      Save Results
-                    </>
-                  )}
-                </button>
-              </div>
-              
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead className="table-header">
-                    <tr>
-                      <th className="text-left p-4 w-8">#</th>
-                      <th className="text-left p-4">Student Name</th>
-                      <th className="text-center p-4 w-24">CA1 (20)</th>
-                      <th className="text-center p-4 w-24">CA2 (20)</th>
-                      <th className="text-center p-4 w-24">Exam (60)</th>
-                      <th className="text-center p-4 w-24">Total</th>
-                      <th className="text-center p-4 w-20">Grade</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {students.map((student, index) => {
-                      const total = getTotal(student);
-                      const grade = getGrade(total);
-                      return (
-                        <tr key={student.id} className="border-b border-border hover:bg-muted/50 transition-colors">
-                          <td className="p-4 text-muted-foreground">{index + 1}</td>
-                          <td className="p-4 font-medium">{student.name}</td>
-                          <td className="p-2">
-                            <input
-                              type="number"
-                              min="0"
-                              max="20"
-                              value={student.ca1}
-                              onChange={(e) => handleScoreChange(student.id, "ca1", e.target.value)}
-                              className="w-full text-center p-2 rounded-lg border border-border bg-background focus:ring-2 focus:ring-primary/50 focus:border-primary"
-                            />
-                          </td>
-                          <td className="p-2">
-                            <input
-                              type="number"
-                              min="0"
-                              max="20"
-                              value={student.ca2}
-                              onChange={(e) => handleScoreChange(student.id, "ca2", e.target.value)}
-                              className="w-full text-center p-2 rounded-lg border border-border bg-background focus:ring-2 focus:ring-primary/50 focus:border-primary"
-                            />
-                          </td>
-                          <td className="p-2">
-                            <input
-                              type="number"
-                              min="0"
-                              max="60"
-                              value={student.exam}
-                              onChange={(e) => handleScoreChange(student.id, "exam", e.target.value)}
-                              className="w-full text-center p-2 rounded-lg border border-border bg-background focus:ring-2 focus:ring-primary/50 focus:border-primary"
-                            />
-                          </td>
-                          <td className="p-4 text-center font-bold text-lg">{total}</td>
-                          <td className="p-4 text-center">
-                            <span className={`inline-block px-3 py-1 rounded-full text-sm font-semibold ${getGradeColor(grade)}`}>
-                              {grade}
-                            </span>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          ) : (
-            <div className="card-elegant p-12 text-center">
-              <div className="w-20 h-20 rounded-full bg-muted mx-auto mb-6 flex items-center justify-center">
-                <FileEdit size={40} className="text-muted-foreground" />
-              </div>
-              <h3 className="font-heading text-xl font-semibold text-secondary mb-2">
-                Select a Class to Begin
-              </h3>
-              <p className="text-muted-foreground max-w-md mx-auto">
-                Choose an academic session, term, class, and subject from the filters above to start entering or editing student results.
-              </p>
-            </div>
-          )}
+
+      {/* TABS Navigation */}
+      <div className="max-w-6xl mx-auto px-6 mt-6">
+        <div className="bg-white p-2 rounded-xl inline-flex gap-2 shadow-sm border border-[#2c0a0e]/10">
+          {[
+            { id: 'profile', label: 'My Profile', icon: User },
+            { id: 'input-result', label: 'Input Results', icon: Layers },
+            { id: 'my-class', label: 'My Class', icon: Users },
+          ].map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`flex items-center gap-2 px-6 py-3 rounded-lg text-sm font-bold transition-all ${
+                activeTab === tab.id 
+                ? 'bg-[#2c0a0e] text-[#fcf6ba] shadow-md' 
+                : 'text-gray-500 hover:bg-gray-50'
+              }`}
+            >
+              <tab.icon size={18} /> {tab.label}
+            </button>
+          ))}
         </div>
+      </div>
+
+      <main className="max-w-6xl mx-auto p-6">
+        
+        {/* TAB 1: PROFILE */}
+        {activeTab === 'profile' && teacherProfile && (
+          <div className="bg-white p-8 rounded-3xl shadow-lg border border-[#d4af37]/20 max-w-2xl animate-in fade-in zoom-in-95">
+             <div className="flex items-center gap-6 mb-8">
+               <div className="h-24 w-24 rounded-full bg-[#2c0a0e] border-4 border-[#d4af37] flex items-center justify-center text-3xl font-bold text-[#fcf6ba] overflow-hidden">
+                 {teacherProfile.passport_url ? <img src={teacherProfile.passport_url} className="w-full h-full object-cover"/> : teacherProfile.full_name[0]}
+               </div>
+               <div>
+                 <h2 className="text-2xl font-bold text-[#2c0a0e]">{teacherProfile.full_name}</h2>
+                 <span className="bg-[#fcf6ba] text-[#2c0a0e] px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wide">
+                   {teacherProfile.role}
+                 </span>
+               </div>
+             </div>
+             
+             <div className="grid grid-cols-2 gap-6">
+               <div className="p-4 bg-gray-50 rounded-xl">
+                 <p className="text-xs text-gray-500 uppercase mb-1">Email Address</p>
+                 <p className="font-medium text-[#2c0a0e]">{teacherProfile.email}</p>
+               </div>
+               <div className="p-4 bg-gray-50 rounded-xl">
+                 <p className="text-xs text-gray-500 uppercase mb-1">Password PIN</p>
+                 <p className="font-medium text-[#2c0a0e] tracking-widest">{teacherProfile.password_text}</p>
+               </div>
+               <div className="p-4 bg-gray-50 rounded-xl">
+                 <p className="text-xs text-gray-500 uppercase mb-1">Section</p>
+                 <p className="font-medium text-[#2c0a0e]">{teacherProfile.section}</p>
+               </div>
+               <div className="p-4 bg-gray-50 rounded-xl">
+                 <p className="text-xs text-gray-500 uppercase mb-1">Assigned Class</p>
+                 <p className="font-medium text-[#2c0a0e]">{teacherProfile.assigned_class || 'None'}</p>
+               </div>
+             </div>
+          </div>
+        )}
+
+        {/* TAB 2: INPUT RESULTS */}
+        {activeTab === 'input-result' && (
+          <div className="space-y-6 animate-in slide-in-from-bottom-4">
+             {/* Controls */}
+             <div className="bg-white p-6 rounded-2xl shadow-sm border border-[#d4af37]/20">
+               <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+                 
+                 <div className="space-y-2">
+                   <label className="text-sm font-bold text-[#2c0a0e]">Select Class</label>
+                   <select 
+                     value={selectedClass} 
+                     onChange={e => { setSelectedClass(e.target.value); setSelectedDepartment(""); setSelectedSubject(""); }}
+                     className="w-full p-3 bg-[#f8f5f2] rounded-xl border-none focus:ring-2 focus:ring-[#d4af37]"
+                   >
+                     <option value="">-- Choose Class --</option>
+                     {getAllowedClasses().map(c => <option key={c} value={c}>{c}</option>)}
+                   </select>
+                 </div>
+
+                 {selectedClass.includes('SS') && (
+                   <div className="space-y-2">
+                     <label className="text-sm font-bold text-[#2c0a0e]">Department</label>
+                     <select 
+                       value={selectedDepartment} 
+                       onChange={e => setSelectedDepartment(e.target.value)}
+                       className="w-full p-3 bg-[#f8f5f2] rounded-xl border-2 border-[#d4af37]/30"
+                     >
+                       <option value="">-- Dept --</option>
+                       <option value="Science">Science</option>
+                       <option value="Art">Art</option>
+                       <option value="Commercial">Commercial</option>
+                     </select>
+                   </div>
+                 )}
+
+                 <div className="space-y-2">
+                   <label className="text-sm font-bold text-[#2c0a0e]">Subject</label>
+                   <select 
+                     value={selectedSubject} 
+                     onChange={e => setSelectedSubject(e.target.value)}
+                     className="w-full p-3 bg-[#f8f5f2] rounded-xl border-none focus:ring-2 focus:ring-[#d4af37]"
+                     disabled={!selectedClass}
+                   >
+                     <option value="">-- Choose Subject --</option>
+                     {filteredSubjects.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
+                   </select>
+                 </div>
+
+                 <button 
+                   onClick={loadResultSheet}
+                   disabled={!selectedClass || !selectedSubject || loading}
+                   className="h-[50px] bg-[#2c0a0e] text-[#fcf6ba] font-bold rounded-xl shadow-lg hover:bg-[#540b0e] transition-all disabled:opacity-50"
+                 >
+                   {loading ? 'Loading...' : 'Load Sheet'}
+                 </button>
+               </div>
+             </div>
+
+             {/* Sheet */}
+             {resultStudents.length > 0 && (
+               <div className="bg-white rounded-3xl shadow-lg border border-[#d4af37]/20 overflow-hidden">
+                 <div className="p-4 bg-[#2c0a0e] text-[#fcf6ba] flex justify-between items-center">
+                   <span className="font-bold">{selectedSubject} - {selectedClass}</span>
+                   <span className="text-xs bg-[#fcf6ba] text-[#2c0a0e] px-2 py-1 rounded">Pending Approval</span>
+                 </div>
+                 <div className="overflow-x-auto">
+                   <table className="w-full text-left min-w-[600px]">
+                     <thead className="bg-gray-50 border-b border-gray-100">
+                       <tr>
+                         <th className="p-4 text-sm font-bold text-gray-500">Student</th>
+                         <th className="p-4 w-24 text-sm font-bold text-gray-500">CA (40)</th>
+                         <th className="p-4 w-24 text-sm font-bold text-gray-500">Exam (60)</th>
+                         <th className="p-4 w-20 text-sm font-bold text-gray-500">Total</th>
+                         <th className="p-4 text-sm font-bold text-gray-500">Action</th>
+                       </tr>
+                     </thead>
+                     <tbody>
+                       {resultStudents.map(student => {
+                         const sScores = scores[student.id] || { ca: 0, exam: 0 };
+                         const total = (sScores.ca || 0) + (sScores.exam || 0);
+                         return (
+                           <tr key={student.id} className="border-b border-gray-50 hover:bg-[#f8f5f2]">
+                             <td className="p-4">
+                               <p className="font-medium text-[#2c0a0e]">{student.full_name}</p>
+                               <p className="text-xs text-gray-500">{student.admission_number}</p>
+                             </td>
+                             <td className="p-4"><input type="number" max="40" value={sScores.ca || ''} onChange={e => handleScoreChange(student.id, 'ca', e.target.value)} className="w-16 p-2 border rounded-lg text-center" /></td>
+                             <td className="p-4"><input type="number" max="60" value={sScores.exam || ''} onChange={e => handleScoreChange(student.id, 'exam', e.target.value)} className="w-16 p-2 border rounded-lg text-center" /></td>
+                             <td className="p-4 font-bold">{total}</td>
+                             <td className="p-4">
+                               <button onClick={() => saveScore(student)} className="p-2 bg-[#2c0a0e] text-[#fcf6ba] rounded hover:bg-[#540b0e]">
+                                 <Save size={16} />
+                               </button>
+                             </td>
+                           </tr>
+                         )
+                       })}
+                     </tbody>
+                   </table>
+                 </div>
+               </div>
+             )}
+          </div>
+        )}
+
+        {/* TAB 3: MY CLASS */}
+        {activeTab === 'my-class' && (
+          <div className="bg-white p-6 rounded-3xl shadow-lg border border-[#d4af37]/20 animate-in fade-in">
+             <div className="flex justify-between items-center mb-6">
+               <h2 className="text-xl font-bold text-[#2c0a0e]">My Class: <span className="text-[#d4af37]">{teacherProfile?.assigned_class}</span></h2>
+               <div className="text-sm bg-[#f8f5f2] px-3 py-1 rounded-lg font-medium text-[#540b0e]">
+                 {myClassStudents.length} Students Assigned
+               </div>
+             </div>
+
+             {myClassStudents.length === 0 ? (
+               <div className="text-center py-12 text-gray-400">
+                 <Users size={48} className="mx-auto mb-2 opacity-20" />
+                 <p>No students found in this class yet.</p>
+               </div>
+             ) : (
+               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                 {myClassStudents.map(student => (
+                   <div key={student.id} className="p-4 border border-gray-100 rounded-xl hover:shadow-md transition-all flex items-center gap-4">
+                      <div className="h-10 w-10 rounded-full bg-gray-100 flex items-center justify-center text-gray-500 font-bold">
+                        {student.full_name[0]}
+                      </div>
+                      <div>
+                        <p className="font-bold text-[#2c0a0e]">{student.full_name}</p>
+                        <p className="text-xs text-gray-500">{student.admission_number}</p>
+                      </div>
+                   </div>
+                 ))}
+               </div>
+             )}
+          </div>
+        )}
+
       </main>
     </div>
   );

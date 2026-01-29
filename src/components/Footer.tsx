@@ -1,4 +1,4 @@
-import schoolLogo from "@/assets/school-logo.png";
+import schoolLogo from "/school-logo.png";
 import { MapPin, Phone, Mail } from "lucide-react";
 
 const Footer = () => {

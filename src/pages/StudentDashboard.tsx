@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { User, FileText, LogOut, BookOpen, Award, Calendar } from "lucide-react";
-import schoolLogo from "@/assets/school-logo.png";
+import schoolLogo from "/school-logo.png";
 import studentPassport from "@/assets/student-passport.jpg";
+import SEO from "@/components/SEO";
 
 // Mock student data
 const studentData = {
@@ -46,6 +47,10 @@ const StudentDashboard = () => {
 
   return (
     <div className="min-h-screen bg-background">
+      <SEO 
+        title="Citadel School of Excellence | Best School in Oko Erin, Kwara"
+        description="Enroll at Citadel School, the leading primary and secondary school in Oko Erin, Kwara State. We offer world-class education, modern facilities, and a moral foundation for your child."
+      />
       {/* Sidebar */}
       <aside className="fixed left-0 top-0 bottom-0 w-64 bg-secondary text-secondary-foreground p-6 hidden lg:flex flex-col">
         <div className="flex items-center gap-3 mb-10">

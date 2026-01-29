@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import schoolLogo from "@/assets/school-logo.png";
+import schoolLogo from "/school-logo.png";
 
 const Header = () => {
   return (
