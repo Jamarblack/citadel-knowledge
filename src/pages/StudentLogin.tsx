@@ -1,119 +1,124 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { GraduationCap, User, Lock, ArrowLeft } from "lucide-react";
-import { Link } from "react-router-dom";
-import schoolLogo from "/school-logo.png";
+import { supabase } from "@/lib/supabase";
+import { toast } from "sonner";
+import { Eye, EyeOff, Lock, User, GraduationCap, ArrowRight, Loader2 } from "lucide-react";
 import SEO from "@/components/SEO";
+import logo from "/school-logo.png";
 
 const StudentLogin = () => {
   const navigate = useNavigate();
-  const [studentId, setStudentId] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  
+  const [formData, setFormData] = useState({
+    admissionNumber: "",
+    password: ""
+  });
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Mock authentication - accept any input
-    if (studentId && password) {
-      navigate("/student-dashboard");
-    } else {
-      setError("Please enter your Student ID and Password");
+    setLoading(true);
+
+    try {
+      // 1. Authenticate Student
+      // Note: We force admission number to uppercase here too for the query
+      const { data, error } = await supabase
+        .from('students')
+        .select('*')
+        .eq('admission_number', formData.admissionNumber.toUpperCase()) 
+        .eq('password_text', formData.password)
+        .single();
+
+      if (error || !data) {
+        throw new Error("Invalid Admission Number or Password");
+      }
+
+      // 2. Save Session
+      localStorage.setItem('studentId', data.id);
+      
+      toast.success("Login Successful!");
+      navigate('/student-dashboard');
+
+    } catch (error: any) {
+      toast.error(error.message || "Login failed");
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen flex" style={{ background: 'var(--gradient-hero)' }}>
-      <SEO 
-        title="Citadel School of Excellence | Best School in Oko Erin, Kwara"
-        description="Enroll at Citadel School, the leading primary and secondary school in Oko Erin, Kwara State. We offer world-class education, modern facilities, and a moral foundation for your child."
-      />
-      {/* Left Panel - Branding */}
-      <div className="hidden lg:flex lg:w-1/2 flex-col justify-center items-center p-12 text-secondary-foreground">
-        <img src={schoolLogo} alt="School Logo" className="w-32 h-32 mb-8 animate-scale-in" />
-        <h1 className="font-heading text-4xl font-bold mb-4 text-center">Student Portal</h1>
-        <p className="text-xl text-secondary-foreground/80 text-center max-w-md">
-          Access your academic records, view results, and track your educational journey.
-        </p>
-        <div className="mt-12 p-6 rounded-xl bg-secondary-foreground/10 backdrop-blur-sm border border-secondary-foreground/20 max-w-sm">
-          <p className="italic text-secondary-foreground/90 text-center">
-            "Education for Future Excellence"
-          </p>
-        </div>
-      </div>
+    <div className="min-h-screen bg-gray-100 flex items-center justify-center p-4 font-sans">
+      <SEO title="Student Login | Citadel" description="Student Portal Access" />
       
-      {/* Right Panel - Login Form */}
-      <div className="w-full lg:w-1/2 flex items-center justify-center p-8 bg-background">
-        <div className="w-full max-w-md">
-          <Link to="/" className="inline-flex items-center gap-2 text-muted-foreground hover:text-primary transition-colors mb-8">
-            <ArrowLeft size={18} />
-            Back to Home
-          </Link>
-          
-          <div className="lg:hidden flex flex-col items-center mb-8">
-            <img src={schoolLogo} alt="School Logo" className="w-20 h-20 mb-4" />
+      <div className="w-full max-w-md bg-white rounded-3xl shadow-xl overflow-hidden border border-green-100">
+        {/* Header */}
+        <div className="bg-yellow-300 p-8 text-center relative overflow-hidden">
+          <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-10"></div>
+          <div className="w-20 h-20  rounded-full flex items-center justify-center mx-auto mb-4 backdrop-blur-sm ">
+            <img src={logo} alt="School Logo" className="w-20 h-20 rounded-full" />
           </div>
-          
-          <div className="card-elegant p-8">
-            <div className="flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-secondary to-navy-light mx-auto mb-6">
-              <GraduationCap size={32} className="text-secondary-foreground" />
+          <h1 className="text-2xl font-bold text-white mb-1">Student Portal</h1>
+        </div>
+
+        {/* Form */}
+        <div className="p-8">
+          <form onSubmit={handleLogin} className="space-y-5">
+            
+            {/* Admission Number Input (UPPERCASE FORCED) */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-gray-500 uppercase ml-1">Admission Number</label>
+              <div className="relative group">
+                <User className="absolute left-4 top-3.5 text-gray-400 group-focus-within:text-[#064e3b] transition-colors" size={20} />
+                <input 
+                  required
+                  type="text" 
+                  placeholder="CKIS/***/****"
+                  className="w-full pl-12 r-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:border-[#064e3b] focus:ring-4 focus:ring-[#064e3b]/5 outline-none transition-all font-medium font-mono uppercase placeholder:normal-case"
+                  value={formData.admissionNumber}
+                  onChange={(e) => setFormData({...formData, admissionNumber: e.target.value.toUpperCase()})}
+                />
+              </div>
             </div>
-            
-            <h2 className="font-heading text-2xl font-bold text-secondary text-center mb-2">
-              Welcome Back, Student
-            </h2>
-            <p className="text-muted-foreground text-center mb-8">
-              Enter your credentials to access your portal
-            </p>
-            
-            {error && (
-              <div className="bg-destructive/10 text-destructive text-sm p-3 rounded-lg mb-6 text-center">
-                {error}
+
+            {/* Password Input */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-gray-500 uppercase ml-1">Password</label>
+              <div className="relative group">
+                <Lock className="absolute left-4 top-3.5 text-gray-400 group-focus-within:text-[#064e3b] transition-colors" size={20} />
+                <input 
+                  required
+                  type={showPassword ? "text" : "password"} 
+                  placeholder="••••••••"
+                  className="w-full pl-12 pr-12 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:border-[#064e3b] focus:ring-4 focus:ring-[#064e3b]/5 outline-none transition-all font-medium"
+                  value={formData.password}
+                  onChange={(e) => setFormData({...formData, password: e.target.value})}
+                />
+                <button 
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-4 top-3.5 text-gray-400 hover:text-gray-600 focus:outline-none"
+                >
+                  {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+                </button>
               </div>
-            )}
-            
-            <form onSubmit={handleLogin} className="space-y-5">
-              <div>
-                <label className="block text-sm font-medium text-foreground mb-2">Student ID</label>
-                <div className="relative">
-                  <User size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                  <input
-                    type="text"
-                    value={studentId}
-                    onChange={(e) => setStudentId(e.target.value)}
-                    placeholder="Enter your student ID"
-                    className="input-field pl-11"
-                  />
-                </div>
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-foreground mb-2">Password</label>
-                <div className="relative">
-                  <Lock size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                  <input
-                    type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="Enter your password"
-                    className="input-field pl-11"
-                  />
-                </div>
-              </div>
-              
-              <button type="submit" className="btn-hero w-full">
-                Login to Portal
-              </button>
-            </form>
-            
-            <p className="text-muted-foreground text-sm text-center mt-6">
-              Forgot your password?{" "}
-              <a href="#" className="text-primary hover:underline">Contact Admin</a>
-            </p>
-          </div>
+            </div>
+
+            <button 
+              type="submit" 
+              disabled={loading}
+              className="w-full py-4 bg-red-600 hover:bg-red-800 text-white rounded-xl font-bold text-lg shadow-lg hover:shadow-xl transition-all flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed mt-4"
+            >
+              {loading ? <Loader2 className="animate-spin" /> : <>Login <ArrowRight size={20} /></>}
+            </button>
+
+          </form>
           
-          <p className="text-muted-foreground text-xs text-center mt-6">
-            Demo: Enter any Student ID and Password to login
-          </p>
+          <div className="mt-8 text-center">
+            <a href="/" className="text-sm font-bold text-gray-400 hover:text-[#064e3b] transition-colors">
+              ← Back to Home
+            </a>
+          </div>
         </div>
       </div>
     </div>

@@ -1,287 +1,340 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { 
-  LogOut, LayoutDashboard, ArrowUpCircle, Users, GraduationCap, 
-  FileCheck, User, Menu, Camera 
+  LayoutDashboard, Users, FileCheck, LogOut, 
+  Menu, CheckCircle, XCircle, User, AlertTriangle, 
+  Camera, Settings, Calendar, Megaphone, Trash2, Plus
 } from "lucide-react";
-import schoolLogo from "/school-logo.png";
-import { toast } from "sonner";
 import { supabase } from "@/lib/supabase";
+import { toast } from "sonner";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import SEO from "@/components/SEO";
+import logo from "/school-logo.png";
+
+// Types
+type ResultBatch = {
+  id: string; class_level: string; subject: string;
+  teacher_name: string; student_count: number; results: any[];
+};
 
 const PrincipalDashboard = () => {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState("overview");
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [adminProfile, setAdminProfile] = useState<any>(null);
+  const [principalProfile, setPrincipalProfile] = useState<any>(null);
   
   // Data States
-  const [stats, setStats] = useState({ staff: 0, students: 0 });
-  const [staffList, setStaffList] = useState<any[]>([]);
+  const [stats, setStats] = useState({ students: 0, teachers: 0, pendingResults: 0 });
   const [studentList, setStudentList] = useState<any[]>([]);
+  const [pendingBatches, setPendingBatches] = useState<ResultBatch[]>([]);
   
-  // Promotion State
-  const [promoFromClass, setPromoFromClass] = useState("");
-  const [promoToClass, setPromoToClass] = useState("");
-  const [promoStudents, setPromoStudents] = useState<any[]>([]);
-
-  // Approval State
-  const [approvalClass, setApprovalClass] = useState("");
-  const [approvalSubject, setApprovalSubject] = useState("");
-  const [pendingResults, setPendingResults] = useState<any[]>([]);
-  const [subjects, setSubjects] = useState<any[]>([]);
-
-  const secondaryClasses = ['JSS 1', 'JSS 2', 'JSS 3', 'SS 1', 'SS 2', 'SS 3'];
+  // Settings & Updates State
+  const [resumptionDate, setResumptionDate] = useState("");
+  const [newResumptionDate, setNewResumptionDate] = useState("");
+  const [updates, setUpdates] = useState<any[]>([]);
+  const [newUpdate, setNewUpdate] = useState({ title: "", category: "Event", event_date: "" });
+  
+  // Modal & Upload States
+  const [selectedBatch, setSelectedBatch] = useState<ResultBatch | null>(null); 
+  const [confirmAction, setConfirmAction] = useState<'approve' | 'reject' | null>(null); 
+  const [loading, setLoading] = useState(false);
+  const [uploading, setUploading] = useState(false);
 
   useEffect(() => {
     const id = localStorage.getItem('staffId');
     if (!id) navigate('/');
     fetchProfile(id!);
     fetchStats();
-    fetchSubjects();
+    fetchStudents();
+    fetchPendingResults();
+    fetchConfig();
+    fetchUpdates();
   }, []);
 
-  // --- FETCHING LOGIC ---
   const fetchProfile = async (id: string) => {
     const { data } = await supabase.from('staff').select('*').eq('id', id).single();
-    if (data) setAdminProfile(data);
+    if (data) setPrincipalProfile(data);
   };
 
+  // --- UPDATES MANAGEMENT ---
+  const fetchUpdates = async () => {
+    const { data } = await supabase.from('school_updates').select('*').order('event_date', { ascending: true });
+    if (data) setUpdates(data);
+  };
+
+  const postUpdate = async () => {
+    if (!newUpdate.title || !newUpdate.event_date) return toast.error("Please fill all fields");
+    setLoading(true);
+    const { error } = await supabase.from('school_updates').insert([newUpdate]);
+    setLoading(false);
+    if (error) toast.error("Failed to post update");
+    else {
+        toast.success("Update Posted!");
+        setNewUpdate({ title: "", category: "Event", event_date: "" });
+        fetchUpdates();
+    }
+  };
+
+  const deleteUpdate = async (id: string) => {
+    const { error } = await supabase.from('school_updates').delete().eq('id', id);
+    if (error) toast.error("Failed to delete");
+    else {
+        toast.success("Update Removed");
+        fetchUpdates();
+    }
+  };
+
+  // --- CONFIG (RESUMPTION DATE) ---
+  const fetchConfig = async () => {
+    const { data } = await supabase.from('school_config').select('next_term_begins').limit(1).maybeSingle();
+    if (data) {
+        setResumptionDate(data.next_term_begins);
+        setNewResumptionDate(data.next_term_begins);
+    }
+  };
+
+  const updateResumptionDate = async () => {
+    if (!newResumptionDate) return;
+    setLoading(true);
+    
+    // Upsert for both sections to keep them synced
+    const { error: error1 } = await supabase.from('school_config').upsert({ section_type: 'Secondary', next_term_begins: newResumptionDate }, { onConflict: 'section_type' });
+    const { error: error2 } = await supabase.from('school_config').upsert({ section_type: 'Primary', next_term_begins: newResumptionDate }, { onConflict: 'section_type' });
+    
+    setLoading(false);
+    if (error1 || error2) toast.error("Failed to update date");
+    else {
+        toast.success("Resumption Date Updated for ALL Students!");
+        setResumptionDate(newResumptionDate);
+    }
+  };
+
+  // --- PROFILE UPLOAD ---
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (!event.target.files?.length || !principalProfile) return;
+    setUploading(true);
+    try {
+        const file = event.target.files[0];
+        const fileExt = file.name.split('.').pop();
+        const filePath = `staff_${principalProfile.id}_${Math.random()}.${fileExt}`;
+        const { error: uploadError } = await supabase.storage.from('passports').upload(filePath, file);
+        if (uploadError) throw uploadError;
+        const { data: { publicUrl } } = supabase.storage.from('passports').getPublicUrl(filePath);
+        const { error: updateError } = await supabase.from('staff').update({ passport_url: publicUrl }).eq('id', principalProfile.id);
+        if (updateError) throw updateError;
+        setPrincipalProfile({ ...principalProfile, passport_url: publicUrl });
+        toast.success("Profile Photo Updated");
+    } catch (e: any) { toast.error("Upload failed: " + e.message); } finally { setUploading(false); }
+  };
+
+  // --- DATA FETCHERS ---
   const fetchStats = async () => {
-    const { count: sCount } = await supabase.from('students').select('*', { count: 'exact', head: true }).in('current_class', secondaryClasses);
-    const { count: tCount } = await supabase.from('staff').select('*', { count: 'exact', head: true }).eq('section', 'Secondary');
-    setStats({ students: sCount || 0, staff: tCount || 0 });
+    const { count: sCount } = await supabase.from('students').select('*', { count: 'exact', head: true }).like('current_class', '%SS%'); 
+    const { count: tCount } = await supabase.from('staff').select('*', { count: 'exact', head: true }).eq('role', 'Teacher').eq('section', 'Secondary');
+    const { count: rCount } = await supabase.from('results').select('*', { count: 'exact', head: true }).eq('status', 'pending');
+    setStats({ students: sCount || 0, teachers: tCount || 0, pendingResults: rCount || 0 });
   };
 
-  const fetchStaffList = async () => {
-    setLoading(true);
-    const { data } = await supabase.from('staff').select('*').eq('section', 'Secondary').order('full_name');
-    if (data) setStaffList(data);
-    setLoading(false);
+  const fetchStudents = async () => {
+    const { data } = await supabase.from('students').select('*').like('current_class', '%SS%').order('current_class');
+    setStudentList(data || []);
   };
 
-  const fetchStudentList = async () => {
-    setLoading(true);
-    const { data } = await supabase.from('students').select('*').in('current_class', secondaryClasses).order('current_class');
-    if (data) setStudentList(data);
-    setLoading(false);
+  const fetchPendingResults = async () => {
+    const { data } = await supabase.from('results').select('*').eq('status', 'pending').order('class_level');
+    if (!data) return;
+    const groups: { [key: string]: ResultBatch } = {};
+    data.forEach((row) => {
+      const key = `${row.class_level}-${row.subject}`;
+      if (!groups[key]) groups[key] = { id: key, class_level: row.class_level, subject: row.subject, teacher_name: row.teacher_name || 'Unknown', student_count: 0, results: [] };
+      groups[key].results.push(row);
+      groups[key].student_count++;
+    });
+    setPendingBatches(Object.values(groups));
   };
 
-  const fetchSubjects = async () => {
-    const { data } = await supabase.from('subjects').select('*').order('name');
-    if (data) setSubjects(data || []);
-  };
-
-  // --- PROMOTION LOGIC ---
-  const loadPromoStudents = async () => {
-    if (!promoFromClass) return;
-    setLoading(true);
-    const { data } = await supabase.from('students').select('*').eq('current_class', promoFromClass).order('full_name');
-    setPromoStudents(data || []);
-    setLoading(false);
-  };
-
-  const handlePromote = async () => {
-    if (!promoToClass || promoStudents.length === 0) return;
-    if (!confirm(`Promote ${promoStudents.length} students to ${promoToClass}?`)) return;
-
+  const initiateBatchAction = (action: 'approve' | 'reject') => setConfirmAction(action);
+  
+  const executeBatchAction = async () => {
+    if (!selectedBatch || !confirmAction) return;
     setLoading(true);
     try {
-      const { error } = await supabase.from('students').update({ current_class: promoToClass }).eq('current_class', promoFromClass);
+      const status = confirmAction === 'approve' ? 'approved' : 'rejected';
+      const ids = selectedBatch.results.map(r => r.id);
+      const { error } = await supabase.from('results').update({ status: status }).in('id', ids);
       if (error) throw error;
-      toast.success("Students Promoted Successfully!");
-      setPromoStudents([]); setPromoFromClass(""); setPromoToClass(""); fetchStats();
-    } catch (e: any) { toast.error("Promotion failed: " + e.message); } 
-    finally { setLoading(false); }
+      toast.success(`Batch ${status.toUpperCase()} successfully!`);
+      setConfirmAction(null); setSelectedBatch(null); fetchStats(); fetchPendingResults();
+    } catch (e: any) { toast.error("Error updating results"); } finally { setLoading(false); }
   };
 
-  // --- APPROVAL LOGIC ---
-  const loadApprovalSheet = async () => {
-    if (!approvalClass || !approvalSubject) return;
-    setLoading(true);
-    const { data } = await supabase.from('results').select('*').eq('class_name', approvalClass).eq('subject', approvalSubject);
-    setPendingResults(data || []);
-    setLoading(false);
-  };
-
-  const handleApprove = async (status: 'approved' | 'rejected') => {
-    if (!confirm(`Mark all as ${status}?`)) return;
-    const { error } = await supabase.from('results').update({ status }).eq('class_name', approvalClass).eq('subject', approvalSubject);
-    if (error) toast.error("Failed"); else { toast.success(`Results ${status}`); loadApprovalSheet(); }
-  };
-
-  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    if (!event.target.files?.length) return;
-    const file = event.target.files[0];
-    const filePath = `principal-${Math.random()}.${file.name.split('.').pop()}`;
-    const { error } = await supabase.storage.from('passports').upload(filePath, file);
-    if (error) return toast.error("Upload failed");
-    const { data: { publicUrl } } = supabase.storage.from('passports').getPublicUrl(filePath);
-    await supabase.from('staff').update({ passport_url: publicUrl }).eq('id', adminProfile.id);
-    setAdminProfile({ ...adminProfile, passport_url: publicUrl });
-    toast.success("Profile Updated");
-  };
-
-  // --- SIDEBAR ---
   const SidebarContent = () => (
     <div className="h-full flex flex-col text-white">
-      {/* 1. TOP: PROFILE */}
-      <div className="p-8 text-center bg-[#172554] border-b border-blue-800">
-         <div className="relative inline-block group">
-           <div className="w-24 h-24 mx-auto rounded-full border-[3px] border-blue-200 shadow-xl overflow-hidden bg-[#1e3a8a]">
-             {adminProfile?.passport_url ? (
-               <img src={adminProfile.passport_url} className="w-full h-full object-cover"/>
-             ) : (
-               <User className="w-full h-full p-5 text-blue-200"/>
-             )}
-           </div>
-           <label className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-full opacity-0 group-hover:opacity-100 cursor-pointer transition-all">
-             <Camera size={20} />
-             <input type="file" className="hidden" accept="image/*" onChange={handleFileUpload} />
-           </label>
+      <div className="p-8 text-center bg-[#0f172a] border-b border-gray-800">
+         <div className="w-24 h-24 mx-auto rounded-full border-[3px] border-blue-500 shadow-xl overflow-hidden bg-gray-800 relative group">
+             {principalProfile?.passport_url ? <img src={principalProfile.passport_url} className="w-full h-full object-cover"/> : <span className="flex items-center justify-center h-full text-2xl font-bold text-blue-400">P</span>}
+             <label className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer">
+                 <Camera className="text-white" size={24} />
+                 <input type="file" className="hidden" accept="image/*" onChange={handleFileUpload} disabled={uploading} />
+             </label>
          </div>
-         <h3 className="font-bold text-lg mt-3 truncate">{adminProfile?.full_name || 'Principal'}</h3>
-         <span className="text-[10px] bg-blue-500/30 px-3 py-0.5 rounded-full uppercase tracking-wider">Secondary Head</span>
+         <h3 className="font-bold text-lg mt-3 truncate">{principalProfile?.full_name || 'Principal'}</h3>
+         <span className="text-[10px] bg-blue-900/50 text-blue-200 px-3 py-0.5 rounded-full uppercase tracking-wider">Administration</span>
       </div>
-
-      {/* 2. MIDDLE: NAV */}
-      <nav className="flex-1 px-4 py-6 space-y-2 overflow-y-auto">
+      <nav className="flex-1 px-4 py-6 space-y-2">
         {[
-          { id: 'overview', label: 'Dashboard', icon: LayoutDashboard },
-          { id: 'promotion', label: 'Promotion', icon: ArrowUpCircle },
-          { id: 'staff', label: 'Secondary Staff', icon: Users },
-          { id: 'students', label: 'Secondary Students', icon: GraduationCap },
+          { id: 'overview', label: 'Overview', icon: LayoutDashboard },
           { id: 'approvals', label: 'Approve Results', icon: FileCheck },
-          { id: 'profile', label: 'My Profile', icon: User },
+          { id: 'updates', label: 'News & Events', icon: Megaphone },
+          { id: 'students', label: 'Students', icon: Users },
+          { id: 'settings', label: 'Settings', icon: Settings }, 
         ].map(item => (
-          <button
-            key={item.id}
-            onClick={() => { setActiveTab(item.id); if(item.id==='staff') fetchStaffList(); if(item.id==='students') fetchStudentList(); setIsMobileMenuOpen(false); }}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all font-medium ${
-              activeTab === item.id 
-              ? 'bg-white text-[#1e3a8a] shadow-lg translate-x-1' 
-              : 'hover:bg-white/10'
-            }`}
-          >
+          <button key={item.id} onClick={() => { setActiveTab(item.id); setIsMobileMenuOpen(false); }}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all font-medium ${activeTab === item.id ? 'bg-blue-600 text-white shadow-lg translate-x-1' : 'hover:bg-gray-800 text-gray-400'}`}>
             <item.icon size={20} /> {item.label}
+            {item.id === 'approvals' && stats.pendingResults > 0 && <span className="ml-auto bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full animate-pulse">{pendingBatches.length}</span>}
           </button>
         ))}
       </nav>
-
-      {/* 3. BOTTOM: LOGO & LOGOUT */}
-      <div className="p-6 bg-[#0f172a]/30 mt-auto border-t border-blue-800/50">
-        <div className="flex items-center gap-3 mb-4 opacity-80">
-          <img src={schoolLogo} className="w-8 h-8 invert brightness-0" />
-          <div>
-            <h4 className="font-bold text-sm leading-none">Citadel</h4>
-            <p className="text-[9px] uppercase tracking-wider opacity-70">School Portal</p>
-          </div>
-        </div>
-        <button 
-          onClick={() => { localStorage.clear(); navigate('/'); }} 
-          className="w-full py-3 bg-red-600 hover:bg-red-700 text-white rounded-xl flex items-center justify-center gap-2 font-bold transition-all shadow-md"
-        >
-          <LogOut size={18} /> Logout
-        </button>
-      </div>
+      <div className="p-6 bg-gray-900/50 mt-auto"><button onClick={() => { localStorage.clear(); navigate('/'); }} className="w-full py-3 bg-red-600/20 hover:bg-red-600 text-red-200 hover:text-white rounded-xl flex items-center justify-center gap-2 font-bold transition-all"><LogOut size={18} /> Logout</button></div>
     </div>
   );
 
   return (
     <div className="min-h-screen bg-slate-50 flex font-sans">
-        <SEO 
-        title="Citadel School of Excellence | Best School in Oko Erin, Kwara"
-        description="Enroll at Citadel School, the leading primary and secondary school in Oko Erin, Kwara State. We offer world-class education, modern facilities, and a moral foundation for your child."
-      />
-      <aside className="hidden lg:block w-72 bg-[#1e3a8a] shadow-xl sticky top-0 h-screen z-30">
-        <SidebarContent />
-      </aside>
+      <SEO title="Principal Portal | Citadel" description="Academic Admin" noindex={true} />
+      
+      {confirmAction && selectedBatch && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in">
+           <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 animate-in zoom-in-95">
+              <div className={`w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-4 ${confirmAction === 'approve' ? 'bg-blue-100 text-blue-600' : 'bg-red-100 text-red-600'}`}>
+                 {confirmAction === 'approve' ? <CheckCircle size={28} /> : <AlertTriangle size={28} />}
+              </div>
+              <h3 className="text-xl font-bold text-center text-gray-900 mb-2">{confirmAction === 'approve' ? 'Approve Results?' : 'Reject Results?'}</h3>
+              <p className="text-center text-gray-500 text-sm mb-6">Are you sure you want to <strong>{confirmAction.toUpperCase()}</strong> the {selectedBatch.subject} results?</p>
+              <div className="grid grid-cols-2 gap-3">
+                 <button onClick={() => setConfirmAction(null)} className="py-3 px-4 rounded-xl border border-gray-200 font-bold text-gray-600 hover:bg-gray-50">Cancel</button>
+                 <button onClick={executeBatchAction} disabled={loading} className={`py-3 px-4 rounded-xl font-bold text-white shadow-lg flex items-center justify-center gap-2 ${confirmAction === 'approve' ? 'bg-blue-600 hover:bg-blue-700' : 'bg-red-600 hover:bg-red-700'}`}>{loading ? 'Processing...' : `Yes, ${confirmAction === 'approve' ? 'Approve' : 'Reject'}`}</button>
+              </div>
+           </div>
+        </div>
+      )}
 
-      <Sheet open={isMobileMenuOpen} onOpenChange={setIsMobileMenuOpen}>
-        <SheetContent side="left" className="p-0 w-72 bg-[#1e3a8a] border-none"><SidebarContent /></SheetContent>
-      </Sheet>
+      {selectedBatch && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95">
+            <div className="bg-[#1e3a8a] p-6 text-white flex justify-between items-center shrink-0">
+              <div><h2 className="text-xl font-bold flex items-center gap-2">{selectedBatch.class_level} - {selectedBatch.subject}</h2><p className="text-blue-200 text-sm">{selectedBatch.student_count} Students Submitted</p></div>
+              <button onClick={() => setSelectedBatch(null)} className="text-blue-200 hover:text-white"><XCircle size={28}/></button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-6 bg-gray-50">
+              <div className="bg-white border rounded-xl shadow-sm overflow-hidden">
+                <table className="w-full text-left text-sm">
+                  <thead className="bg-gray-100 text-gray-700 font-bold border-b"><tr><th className="p-4">Student Name</th><th className="p-4 text-center">CA (40)</th><th className="p-4 text-center">Exam (60)</th><th className="p-4 text-center">Total (100)</th><th className="p-4 text-center">Grade</th></tr></thead>
+                  <tbody className="divide-y">{selectedBatch.results.map((res: any) => (<tr key={res.id} className="hover:bg-blue-50/50"><td className="p-4 font-medium text-gray-900">{res.student_name}</td><td className="p-4 text-center text-gray-600">{(res.ca1_score||0) + (res.ca2_score||0)}</td><td className="p-4 text-center text-gray-600">{res.exam_score}</td><td className="p-4 text-center font-bold text-blue-900">{res.total_score}</td><td className={`p-4 text-center font-bold ${res.total_score < 40 ? 'text-red-500' : 'text-green-600'}`}>{res.grade}</td></tr>))}</tbody>
+                </table>
+              </div>
+              <div className="mt-8 flex justify-end"><div className="text-right border-t-2 border-gray-300 pt-2 px-4"><p className="text-xs text-gray-500 uppercase font-bold tracking-widest">Uploaded By</p><p className="text-lg font-serif font-bold text-[#1e3a8a]">{selectedBatch.teacher_name}</p><p className="text-xs text-gray-400 italic">Subject Teacher</p></div></div>
+            </div>
+            <div className="p-6 bg-white border-t flex justify-end gap-4 shrink-0">
+               <button onClick={() => initiateBatchAction('reject')} disabled={loading} className="px-6 py-3 bg-red-100 text-red-700 font-bold rounded-xl hover:bg-red-200 transition-colors">Reject Batch</button>
+               <button onClick={() => initiateBatchAction('approve')} disabled={loading} className="px-6 py-3 bg-[#1e3a8a] text-white font-bold rounded-xl hover:bg-blue-900 shadow-lg transition-all flex items-center gap-2"><CheckCircle size={18}/> Approve Batch</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <aside className="hidden lg:block w-72 bg-[#0f172a] shadow-xl sticky top-0 h-screen z-30"><SidebarContent /></aside>
+      <Sheet open={isMobileMenuOpen} onOpenChange={setIsMobileMenuOpen}><SheetContent side="left" className="p-0 w-72 bg-[#0f172a] border-none"><SidebarContent /></SheetContent></Sheet>
 
       <main className="flex-1 h-screen overflow-y-auto">
-        {/* Mobile Header */}
         <header className="lg:hidden p-4 bg-white border-b flex justify-between items-center sticky top-0 z-20">
-          <button onClick={() => setIsMobileMenuOpen(true)}><Menu className="text-[#1e3a8a]" /></button>
-          <span className="font-bold text-[#1e3a8a] text-lg">Principal Portal</span>
+          <button onClick={() => setIsMobileMenuOpen(true)}><Menu className="text-blue-900" /></button>
+          <span className="font-bold text-blue-900 text-lg"> <img src={logo} alt="School Logo" className="w-8 h-8 inline-block mr-2" /> Principal Portal</span>
         </header>
 
         <div className="p-6 md:p-10 max-w-7xl mx-auto">
-          
-          {/* TAB 1: OVERVIEW */}
           {activeTab === 'overview' && (
-            <div className="space-y-6 animate-in fade-in">
-              <h1 className="text-2xl font-bold text-gray-800">Overview</h1>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="bg-white p-8 rounded-2xl shadow-sm border border-blue-100">
-                  <p className="text-gray-500 font-medium">Secondary Students</p>
-                  <h3 className="text-4xl font-bold text-[#1e3a8a] mt-2">{stats.students}</h3>
-                </div>
-                <div className="bg-[#1e3a8a] p-8 rounded-2xl shadow-lg text-white">
-                  <p className="text-blue-100 font-medium">Secondary Staff</p>
-                  <h3 className="text-4xl font-bold mt-2">{stats.staff}</h3>
-                </div>
+            <div className="animate-in fade-in space-y-6">
+              <h1 className="text-2xl font-bold text-gray-800">Dashboard Overview</h1>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="bg-white p-6 rounded-2xl shadow-sm border border-blue-100"><h3 className="text-gray-500 font-bold text-sm uppercase">Students (Sec)</h3><p className="text-4xl font-bold text-blue-900 mt-2">{stats.students}</p></div>
+                <div className="bg-white p-6 rounded-2xl shadow-sm border border-blue-100"><h3 className="text-gray-500 font-bold text-sm uppercase">Pending Approvals</h3><p className="text-4xl font-bold text-orange-500 mt-2">{stats.pendingResults}</p></div>
               </div>
             </div>
           )}
 
-          {/* TAB 2: PROMOTION */}
-          {activeTab === 'promotion' && (
+          {activeTab === 'approvals' && (
              <div className="space-y-6 animate-in fade-in">
-               <h1 className="text-2xl font-bold text-gray-800">Promote Students</h1>
-               <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
-                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end mb-6">
-                   <div className="space-y-2"><label className="text-sm font-bold text-gray-600">From Class</label><select className="w-full p-3 bg-gray-50 border rounded-xl" value={promoFromClass} onChange={e => setPromoFromClass(e.target.value)}><option value="">Select</option>{secondaryClasses.map(c => <option key={c}>{c}</option>)}</select></div>
-                   <div className="space-y-2"><label className="text-sm font-bold text-gray-600">To Class</label><select className="w-full p-3 bg-gray-50 border rounded-xl" value={promoToClass} onChange={e => setPromoToClass(e.target.value)}><option value="">Select</option>{secondaryClasses.map(c => <option key={c}>{c}</option>)}<option value="Graduated">Graduated</option></select></div>
-                   <button onClick={loadPromoStudents} className="p-3 bg-gray-800 text-white rounded-xl font-bold">Load Students</button>
-                 </div>
-                 {promoStudents.length > 0 && (
-                   <div>
-                     <div className="p-4 bg-blue-50 text-blue-800 rounded-xl mb-4 flex justify-between items-center"><span>Found <b>{promoStudents.length}</b> students</span><button onClick={handlePromote} disabled={loading} className="px-6 py-2 bg-[#1e3a8a] text-white font-bold rounded-lg hover:bg-blue-800">{loading?'Processing...':'Promote All'}</button></div>
-                     <div className="max-h-96 overflow-y-auto border rounded-xl"><table className="w-full text-left"><thead className="bg-gray-100 sticky top-0"><tr><th className="p-3">Name</th><th className="p-3">Admission No</th></tr></thead><tbody>{promoStudents.map(s => (<tr key={s.id} className="border-b"><td className="p-3">{s.full_name}</td><td className="p-3 font-mono text-xs">{s.admission_number}</td></tr>))}</tbody></table></div>
-                   </div>
-                 )}
-               </div>
+               <div className="flex justify-between items-center"><h1 className="text-2xl font-bold text-gray-800">Result Approvals</h1><span className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-xs font-bold">{pendingBatches.length} Batches Pending</span></div>
+               {pendingBatches.length > 0 ? (
+                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">{pendingBatches.map(batch => (<div key={batch.id} onClick={() => setSelectedBatch(batch)} className="bg-white border border-gray-200 p-6 rounded-2xl shadow-sm hover:shadow-md hover:border-blue-300 transition-all cursor-pointer group"><div className="flex justify-between items-start mb-4"><div className="w-12 h-12 rounded-xl bg-blue-50 flex items-center justify-center text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-colors"><FileCheck size={24} /></div><span className="text-xs font-bold bg-orange-100 text-orange-700 px-2 py-1 rounded">Pending</span></div><h3 className="text-lg font-bold text-gray-800">{batch.subject}</h3><p className="text-sm font-medium text-gray-500 mb-4">{batch.class_level}</p><div className="flex items-center gap-3 text-xs text-gray-400 border-t pt-4"><User size={14} /> <span className="truncate">{batch.teacher_name}</span><span className="ml-auto font-bold text-gray-600">{batch.student_count} Students</span></div></div>))}</div>
+               ) : (<div className="bg-white p-12 text-center rounded-2xl border border-dashed border-gray-300 text-gray-400"><CheckCircle size={48} className="mx-auto mb-3 opacity-20 text-green-500"/><p>No pending results.</p></div>)}
              </div>
           )}
 
-          {/* TAB 3: STAFF LIST */}
-          {activeTab === 'staff' && (
+          {/* --- NEW: NEWS & UPDATES TAB --- */}
+          {activeTab === 'updates' && (
             <div className="space-y-6 animate-in fade-in">
-               <h1 className="text-2xl font-bold text-gray-800">Secondary Staff</h1>
-               <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden"><table className="w-full text-left"><thead className="bg-[#1e3a8a] text-white"><tr><th className="p-4">Staff</th><th className="p-4">Role</th><th className="p-4">Contact</th></tr></thead><tbody>{staffList.map(s => (<tr key={s.id} className="border-b hover:bg-gray-50"><td className="p-4 flex items-center gap-3"><div className="w-10 h-10 rounded-full bg-gray-200 overflow-hidden">{s.passport_url?<img src={s.passport_url} className="w-full h-full object-cover"/>:<span className="flex items-center justify-center h-full font-bold text-gray-500">{s.full_name[0]}</span>}</div><div><p className="font-bold">{s.full_name}</p><p className="text-xs text-gray-500">{s.email}</p></div></td><td className="p-4"><span className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs font-bold">{s.role}</span></td><td className="p-4 font-mono text-sm">{s.password_text}</td></tr>))}</tbody></table></div>
+                <h1 className="text-2xl font-bold text-gray-800">Manage News & Updates</h1>
+                
+                {/* POST NEW UPDATE */}
+                <div className="bg-white p-6 rounded-2xl shadow-sm border border-blue-100 flex flex-col md:flex-row gap-4 items-end">
+                    <div className="w-full">
+                        <label className="text-xs font-bold text-gray-400 uppercase">Title</label>
+                        <input type="text" className="w-full p-3 bg-gray-50 border rounded-xl" placeholder="e.g. Inter-House Sports" value={newUpdate.title} onChange={e => setNewUpdate({...newUpdate, title: e.target.value})} />
+                    </div>
+                    <div className="w-full md:w-48">
+                        <label className="text-xs font-bold text-gray-400 uppercase">Category</label>
+                        <select className="w-full p-3 bg-gray-50 border rounded-xl" value={newUpdate.category} onChange={e => setNewUpdate({...newUpdate, category: e.target.value})}>
+                            <option>Event</option><option>Holiday</option><option>Admission</option><option>News</option>
+                        </select>
+                    </div>
+                    <div className="w-full md:w-48">
+                        <label className="text-xs font-bold text-gray-400 uppercase">Date</label>
+                        <input type="date" className="w-full p-3 bg-gray-50 border rounded-xl" value={newUpdate.event_date} onChange={e => setNewUpdate({...newUpdate, event_date: e.target.value})} />
+                    </div>
+                    <button onClick={postUpdate} disabled={loading} className="px-6 py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 flex items-center gap-2">{loading ? 'Posting...' : <><Plus size={18}/> Post</>}</button>
+                </div>
+
+                {/* LIST OF UPDATES */}
+                <div className="bg-white rounded-2xl shadow-sm border border-blue-100 overflow-hidden">
+                    <table className="w-full text-left text-sm">
+                        <thead className="bg-blue-50 text-blue-900 border-b border-blue-100">
+                            <tr><th className="p-4">Title</th><th className="p-4">Category</th><th className="p-4">Date</th><th className="p-4 text-right">Action</th></tr>
+                        </thead>
+                        <tbody className="divide-y divide-blue-50">
+                            {updates.map(update => (
+                                <tr key={update.id} className="hover:bg-blue-50/50">
+                                    <td className="p-4 font-bold">{update.title}</td>
+                                    <td className="p-4"><span className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs font-bold">{update.category}</span></td>
+                                    <td className="p-4 text-gray-500">{new Date(update.event_date).toDateString()}</td>
+                                    <td className="p-4 text-right"><button onClick={() => deleteUpdate(update.id)} className="text-red-500 hover:bg-red-50 p-2 rounded-lg transition-colors"><Trash2 size={18}/></button></td>
+                                </tr>
+                            ))}
+                            {updates.length === 0 && <tr><td colSpan={4} className="p-8 text-center text-gray-400">No updates posted yet.</td></tr>}
+                        </tbody>
+                    </table>
+                </div>
             </div>
           )}
 
-          {/* TAB 4: STUDENT LIST */}
-          {activeTab === 'students' && (
+          {activeTab === 'students' && (<div className="bg-white rounded-2xl shadow-sm border p-6"><p>Student List...</p></div>)}
+
+          {/* --- SETTINGS TAB (Resumption Date) --- */}
+          {activeTab === 'settings' && (
             <div className="space-y-6 animate-in fade-in">
-               <h1 className="text-2xl font-bold text-gray-800">Secondary Students</h1>
-               <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden"><table className="w-full text-left"><thead className="bg-[#1e3a8a] text-white"><tr><th className="p-4">Student</th><th className="p-4">Class</th><th className="p-4">Admission</th></tr></thead><tbody>{studentList.map(s => (<tr key={s.id} className="border-b hover:bg-gray-50"><td className="p-4 flex items-center gap-3"><div className="w-10 h-10 rounded-full bg-gray-200 overflow-hidden">{s.passport_url?<img src={s.passport_url} className="w-full h-full object-cover"/>:<span className="flex items-center justify-center h-full font-bold text-gray-500">{s.full_name[0]}</span>}</div><span className="font-bold">{s.full_name}</span></td><td className="p-4">{s.current_class}</td><td className="p-4 font-mono text-sm">{s.admission_number}</td></tr>))}</tbody></table></div>
+                <h1 className="text-2xl font-bold text-gray-800">School Configuration</h1>
+                <div className="bg-white p-8 rounded-2xl shadow-sm border border-blue-100 max-w-2xl">
+                    <div className="flex items-center gap-3 mb-6"><div className="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center text-blue-600"><Calendar size={20}/></div><div><h3 className="font-bold text-gray-800">Resumption Date</h3><p className="text-xs text-gray-500">Set the next term begin date for ALL students.</p></div></div>
+                    <div className="space-y-4">
+                        <div><label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Current Setting</label><div className="text-lg font-bold text-blue-900">{resumptionDate || 'Not Set'}</div></div>
+                        <div className="pt-4 border-t border-gray-100"><label className="text-xs font-bold text-gray-500 uppercase mb-2 block">Update Date</label><div className="flex gap-4"><input type="text" placeholder="e.g. January 12th, 2026" className="flex-1 p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none" value={newResumptionDate} onChange={(e) => setNewResumptionDate(e.target.value)} /><button onClick={updateResumptionDate} disabled={loading} className="bg-blue-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-blue-700 transition-all disabled:opacity-50">{loading ? 'Saving...' : 'Save'}</button></div></div>
+                    </div>
+                </div>
             </div>
           )}
 
-          {/* TAB 5: APPROVALS */}
-          {activeTab === 'approvals' && (
-            <div className="space-y-6 animate-in fade-in">
-               <h1 className="text-2xl font-bold text-gray-800">Result Approvals</h1>
-               <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
-                  <div className="flex flex-col md:flex-row gap-4 mb-6"><select className="p-3 border rounded-xl" value={approvalClass} onChange={e => setApprovalClass(e.target.value)}><option value="">Select Class</option>{secondaryClasses.map(c => <option key={c}>{c}</option>)}</select><select className="p-3 border rounded-xl" value={approvalSubject} onChange={e => setApprovalSubject(e.target.value)}><option value="">Select Subject</option>{subjects.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}</select><button onClick={loadApprovalSheet} className="p-3 bg-[#1e3a8a] text-white font-bold rounded-xl">Fetch</button></div>
-                  {pendingResults.length > 0 ? (<div><div className="flex gap-4 mb-4"><button onClick={() => handleApprove('approved')} className="px-4 py-2 bg-green-600 text-white font-bold rounded-lg hover:bg-green-700">Approve Sheet</button><button onClick={() => handleApprove('rejected')} className="px-4 py-2 bg-red-600 text-white font-bold rounded-lg hover:bg-red-700">Reject Sheet</button></div><table className="w-full text-left text-sm"><thead className="bg-gray-100"><tr><th className="p-3">Student</th><th className="p-3">Total Score</th><th className="p-3">Status</th></tr></thead><tbody>{pendingResults.map(r => (<tr key={r.id} className="border-b"><td className="p-3">{r.student_name}</td><td className="p-3 font-bold">{r.total_score}</td><td className="p-3 uppercase text-xs font-bold">{r.status}</td></tr>))}</tbody></table></div>) : <p className="text-gray-400 text-center py-10">Select a Class & Subject.</p>}
-               </div>
-            </div>
-          )}
-
-          {/* TAB 6: PROFILE */}
-          {activeTab === 'profile' && adminProfile && (
-            <div className="max-w-xl mx-auto bg-white p-8 rounded-3xl shadow-lg border border-gray-200 text-center animate-in zoom-in-95">
-               <div className="relative inline-block mb-6 group"><div className="w-32 h-32 rounded-full border-4 border-white shadow-xl overflow-hidden bg-[#1e3a8a]">{adminProfile.passport_url ? <img src={adminProfile.passport_url} className="w-full h-full object-cover"/> : <User className="w-full h-full p-6 text-white"/>}</div><label className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-full opacity-0 group-hover:opacity-100 cursor-pointer transition-all text-white font-bold"><Camera size={24} /> Upload<input type="file" className="hidden" accept="image/*" onChange={handleFileUpload} /></label></div><h2 className="text-2xl font-bold text-gray-800">{adminProfile.full_name}</h2><p className="text-blue-600 font-medium mb-6">Principal</p><div className="text-left space-y-4 bg-gray-50 p-6 rounded-2xl"><div><p className="text-xs text-gray-500 uppercase">Email</p><p className="font-bold">{adminProfile.email}</p></div><div><p className="text-xs text-gray-500 uppercase">Password PIN</p><p className="font-bold tracking-widest">{adminProfile.password_text}</p></div></div>
-            </div>
-          )}
         </div>
       </main>
     </div>
