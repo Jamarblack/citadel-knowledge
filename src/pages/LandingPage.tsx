@@ -9,7 +9,6 @@ import { motion, AnimatePresence } from "framer-motion";
 import { supabase } from "@/lib/supabase";
 import SEO from "@/components/SEO";
 
-// --- ASSETS IMPORT ---
 import logo from "/school-logo.png"; 
 import director from "@/assets/Citadel CEO.jpeg";
 import sign from "@/assets/signature MCeo.svg";
@@ -20,11 +19,19 @@ import award4 from "@/assets/5th mathematics Quiz Competition by F-De Bright.jpg
 import award5 from "@/assets/Cert of participation Citadel.jpg";
 import award6 from "@/assets/citadel@10.jpg";
 import award7 from "@/assets/QESD by UK accreditation.jpg";
+import ckis1 from "@/assets/ckis 1.jpg";
+import ckis2 from "@/assets/ckis2.jpg";
+import ckis3 from "@/assets/ckis3.jpg";
+import ckis4 from "@/assets/ckis4.jpg";
+import ckis5 from "@/assets/ckis5.jpg";
+import ckis6 from "@/assets/ckis6.jpg";
+import ckis7 from "@/assets/ckis7.jpg";
+import ckis8 from "@/assets/ckis8.jpg";
+
+
 
 const HERO_SLIDES = [
-  "https://images.unsplash.com/photo-1523050854058-8df90110c9f1?q=80&w=1200&auto=format&fit=crop",
-  "https://images.unsplash.com/photo-1541339907198-e08756dedf3f?q=80&w=1200&auto=format&fit=crop",
-  "https://images.unsplash.com/photo-1580582932707-520aed937b7b?q=80&w=1200&auto=format&fit=crop",
+  ckis1, ckis2, ckis3, ckis4, ckis5, ckis6, ckis7, ckis8
 ];
 
 const AWARDS = [
@@ -264,18 +271,18 @@ const LandingPage = () => {
             </div>
             <div className="grid md:grid-cols-2 gap-12">
                 <div className="bg-[#fdfbf7] p-10 rounded-3xl border border-amber-100 hover:shadow-lg transition-shadow text-center">
-                    <div className="w-16 h-16 mx-auto bg-amber-100 rounded-full flex items-center justify-center text-amber-800 mb-6">
+                    {/* <div className="w-16 h-16 mx-auto bg-amber-100 rounded-full flex items-center justify-center text-amber-800 mb-6">
                         <Globe size={32} />
-                    </div>
+                    </div> */}
                     <h3 className="text-2xl font-bold text-amber-950 mb-4">Vision Statement</h3>
                     <p className="text-gray-600 leading-relaxed">
                         Citadel of Knowledge International School is established to produce a generation of educated pupils/students through thorough teaching methods guided by well-structured curriculum, which will imbibe quest to excel with confidence and integrity.
                     </p>
                 </div>
                 <div className="bg-[#fdfbf7] p-10 rounded-3xl border border-amber-100 hover:shadow-lg transition-shadow text-center">
-                    <div className="w-16 h-16 mx-auto bg-amber-100 rounded-full flex items-center justify-center text-amber-800 mb-6">
+                    {/* <div className="w-16 h-16 mx-auto bg-amber-100 rounded-full flex items-center justify-center text-amber-800 mb-6">
                         <Award size={32} />
-                    </div>
+                    </div> */}
                     <h3 className="text-2xl font-bold text-amber-950 mb-4">Mission Statement</h3>
                     <p className="text-gray-600 leading-relaxed">
                         To employ thorough teaching techniques that would adequately equip pupils/students to pass examinations without recourse to any form of malpractice, thereby producing young school leavers with potentials, who will eventually contribute to the socio-economic and technological development of the state and the nation at large.
@@ -391,7 +398,7 @@ const LandingPage = () => {
                         <div><label className="text-xs font-bold text-gray-400 uppercase ml-1">Full Name</label><input type="text" className="w-full p-3 bg-gray-50 rounded-xl border border-gray-200 outline-none focus:border-amber-500" placeholder="Parent's Name" /></div>
                         <div><label className="text-xs font-bold text-gray-400 uppercase ml-1">Email / Phone</label><input type="text" className="w-full p-3 bg-gray-50 rounded-xl border border-gray-200 outline-none focus:border-amber-500" placeholder="How do we reach you?" /></div>
                         <div><label className="text-xs font-bold text-gray-400 uppercase ml-1">Message</label><textarea rows={3} className="w-full p-3 bg-gray-50 rounded-xl border border-gray-200 outline-none focus:border-amber-500" placeholder="I want to enquire about..."></textarea></div>
-                        <button className="w-full py-3 bg-amber-900 text-white font-bold rounded-xl shadow-lg hover:bg-amber-800 transition-all flex items-center justify-center gap-2">Send Message <Send size={18} /></button>
+                        <button className="w-full py-3 bg-amber-900 text-white font-bold rounded-xl shadow-lg hover:bg-amber-800 transition-all flex items-center justify-center gap-2">Send Message</button>
                     </form>
                 </div>
             </div>
