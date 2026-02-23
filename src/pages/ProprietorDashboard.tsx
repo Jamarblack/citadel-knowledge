@@ -316,7 +316,7 @@ const ProprietorDashboard = () => {
           { id: 'student-list', label: 'Student Database', icon: Users },
           { id: 'updates', label: 'News & Events', icon: Megaphone }, // NEW
           { id: 'settings', label: 'Global Settings', icon: Settings },
-          { id: 'config', label: 'School Config', icon: Calendar }, // NEW
+          { id: 'config', label: 'School Calendar', icon: Calendar }, // NEW
           { id: 'profile', label: 'My Profile', icon: Users },
         ].map(item => (
           <button key={item.id} onClick={() => { setActiveTab(item.id); if(item.id==='staff-list') fetchStaffList(); if(item.id==='student-list') fetchStudentList(); setIsMobileMenuOpen(false); }}

@@ -27,11 +27,15 @@ import ckis5 from "@/assets/ckis5.jpg";
 import ckis6 from "@/assets/ckis6.jpg";
 import ckis7 from "@/assets/ckis7.jpg";
 import ckis8 from "@/assets/ckis8.jpg";
+import ckis9 from "@/assets/ckis9.jpg";
+import ckis10 from "@/assets/ckis10.jpg";
+import ckis11 from "@/assets/ckis11.jpg";
+import ckis12 from "@/assets/upscalemedia-transformed.jpeg"
 
 
 
 const HERO_SLIDES = [
-  ckis1, ckis2, ckis3, ckis4, ckis5, ckis6, ckis7, ckis8
+  ckis1, ckis2, ckis3, ckis4, ckis5, ckis6, ckis7, ckis8, ckis9, ckis10, ckis11, ckis12
 ];
 
 const AWARDS = [
@@ -340,7 +344,7 @@ const LandingPage = () => {
         </div>
       </section>
 
-      {/* --- FULL WIDTH ACTIVITY SLIDER --- */}
+     
       <section id="academics" className="py-10 bg-gray-900 text-white">
         <div className="text-center mb-10 space-y-2">
             <h2 className="text-3xl md:text-4xl font-bold font-serif">Life at Citadel</h2>
@@ -356,7 +360,7 @@ const LandingPage = () => {
                     animate={{ opacity: 1, scale: 1 }}
                     exit={{ opacity: 0 }}
                     transition={{ duration: 0.7 }}
-                    className="absolute inset-0 w-full h-full object-cover"
+                    className="absolute inset-0 w-full h-full object-scale-down "
                 />
             </AnimatePresence>
             
@@ -439,7 +443,7 @@ const LandingPage = () => {
                 </div>
             </div>
         </div>
-        <div className="border-t border-white/10 mt-12 pt-8 text-center text-xs opacity-40">&copy; 2026 Citadel Schools. All rights reserved.</div>
+        <div className="border-t border-white/10 mt-12 pt-8 text-center text-xs opacity-40"> <p>© {new Date().getFullYear()} Citadel Of Knowledge International School/ College. All Rights Reserved.</p> </div>
       </footer>
     </div>
   );

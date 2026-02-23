@@ -189,9 +189,9 @@ const HeadTeacherDashboard = () => {
 
   const SidebarContent = () => (
     <div className="h-full flex flex-col text-white">
-      <div className="p-8 text-center bg-orange-300 border-b border-green-900">
+      <div className="p-8 text-center bg-amber-300 border-b border-green-950">
          <div className="relative inline-block group">
-            <div className="w-24 h-24 mx-auto rounded-full border-[3px] border-green-500 shadow-xl overflow-hidden bg-green-900">
+            <div className="w-24 h-24 mx-auto rounded-full border-[3px] border-orange-500 shadow-xl overflow-hidden bg-amber-900">
                 {headTeacherProfile?.passport_url ? <img src={headTeacherProfile.passport_url} className="w-full h-full object-cover"/> : <span className="flex items-center justify-center h-full text-2xl font-bold text-green-400">H</span>}
             </div>
             <label className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-full opacity-0 group-hover:opacity-100 cursor-pointer transition-all">
@@ -199,21 +199,21 @@ const HeadTeacherDashboard = () => {
                 <input type="file" className="hidden" accept="image/*" onChange={handleFileUpload} disabled={uploading} />
             </label>
          </div>
-         <h3 className="font-bold text-lg mt-3 truncate">{headTeacherProfile?.full_name || 'Head Teacher'}</h3>
-         <span className="text-[10px] bg-orange-400 text-green-200 px-3 py-0.5 rounded-full uppercase tracking-wider">Primary Admin</span>
+         <h3 className="font-bold text-orange-500 text-lg mt-3 truncate">{headTeacherProfile?.full_name || 'Head Teacher'}</h3>
+         <span className="text-[10px] bg-orange-500 text-amber-300 px-3 py-0.5 rounded-full uppercase tracking-wider">Primary Admin</span>
       </div>
-      <nav className="flex-1 px-4 py-6 bg-orange-300 border-b-3 border-green-950 space-y-2">
+      <nav className="flex-1 px-4 py-6 bg-amber-300 border-b-3 border-orange-950 space-y-2">
         {[
           { id: 'overview', label: 'Overview', icon: LayoutDashboard },
           { id: 'approvals', label: 'Approve Results', icon: FileCheck },
-          { id: 'updates', label: 'News & Events', icon: Megaphone }, // NEW
+          { id: 'updates', label: 'News & Events', icon: Megaphone },
           { id: 'students', label: 'Pupils Database', icon: Users },
           { id: 'teachers', label: 'Primary Teachers', icon: GraduationCap },
-          { id: 'settings', label: 'Settings', icon: Settings }, // NEW
+          { id: 'settings', label: 'Settings', icon: Settings }, 
           { id: 'profile', label: 'My Profile', icon: User },
         ].map(item => (
           <button key={item.id} onClick={() => { setActiveTab(item.id); setIsMobileMenuOpen(false); }}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all font-medium ${activeTab === item.id ? 'bg-[#14532d] text-white shadow-lg translate-x-1' : 'hover:bg-green-900/50 text-green-200'}`}>
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all font-medium ${activeTab === item.id ? 'bg-orange-500 text-white shadow-lg translate-x-1' : 'hover:bg-orange-500/50 text-slate-700'}`}>
             <item.icon size={20} /> {item.label}
             {item.id === 'approvals' && stats.pendingResults > 0 && (
               <span className="ml-auto bg-yellow-500 text-[#052e16] text-[10px] font-bold px-2 py-0.5 rounded-full animate-pulse">{pendingBatches.length}</span>
@@ -221,14 +221,14 @@ const HeadTeacherDashboard = () => {
           </button>
         ))}
       </nav>
-      <div className="p-6 bg-orange-300 mt-auto">
-        <button onClick={() => { localStorage.clear(); navigate('/'); }} className="w-full py-3 bg-red-600/70 hover:bg-red-600 text-red-200 hover:text-white rounded-xl flex items-center justify-center gap-2 font-bold transition-all"><LogOut size={18} /> Logout</button>
+      <div className="p-6 bg-amber-300 mt-auto">
+        <button onClick={() => { localStorage.clear(); navigate('/'); }} className="w-full py-3 bg-red-600 hover:bg-red-500 text-red-200 hover:text-white rounded-xl flex items-center justify-center gap-2 font-bold transition-all"><LogOut size={18} /> Logout</button>
       </div>
     </div>
   );
 
   return (
-    <div className="min-h-screen bg-orange-200 flex font-sans">
+    <div className="min-h-screen bg-amber-300 flex font-sans">
       <SEO title="Head Teacher Portal | Citadel" description="Primary Section Admin" noindex={true} />
       
       {/* --- CUSTOM CONFIRM MODAL --- */}
@@ -288,19 +288,19 @@ const HeadTeacherDashboard = () => {
       <Sheet open={isMobileMenuOpen} onOpenChange={setIsMobileMenuOpen}><SheetContent side="left" className="p-0 w-72 bg-[#052e16] border-none"><SidebarContent /></SheetContent></Sheet>
 
       <main className="flex-1 h-screen overflow-y-auto">
-        <header className="lg:hidden p-4 bg-white border-b flex justify-between items-center sticky top-0 z-20">
+        <header className="lg:hidden p-4 bg-orange-400 border-b flex justify-between items-center sticky top-0 z-20">
           <button onClick={() => setIsMobileMenuOpen(true)}><Menu className="text-green-900" /></button>
-          <span className="font-bold text-green-900 text-lg"> <img src={logo} alt="School Logo" className="w-8 h-8 inline-block mr-2" /> Head Teacher Portal</span>
+          <span className="font-bold text-slate-900 text-lg"> <img src={logo} alt="School Logo" className="w-8 h-8 inline-block mr-2" /> Head Teacher Portal</span>
         </header>
 
         <div className="p-6 md:p-10 max-w-7xl mx-auto">
           {activeTab === 'overview' && (
             <div className="animate-in fade-in space-y-6">
-              <h1 className="text-2xl font-bold text-green-900">Dashboard Overview</h1>
+              <h1 className="text-2xl font-bold text-slate-900">Dashboard Overview</h1>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div className="bg-white p-6 rounded-2xl shadow-sm border border-green-100"><h3 className="text-gray-500 font-bold text-sm uppercase">Pupils (Primary)</h3><p className="text-4xl font-bold text-[#14532d] mt-2">{stats.students}</p></div>
-                <div className="bg-white p-6 rounded-2xl shadow-sm border border-green-100"><h3 className="text-gray-500 font-bold text-sm uppercase">Teachers (Primary)</h3><p className="text-4xl font-bold text-[#14532d] mt-2">{stats.teachers}</p></div>
-                <div className="bg-white p-6 rounded-2xl shadow-sm border border-green-100"><h3 className="text-gray-500 font-bold text-sm uppercase">Pending Approvals</h3><p className="text-4xl font-bold text-yellow-600 mt-2">{stats.pendingResults}</p></div>
+                <div className="bg-orange-400 p-6 rounded-2xl shadow-sm border border-slate-900"><h3 className="text-slate-800 font-bold text-sm uppercase">Pupils (Primary)</h3><p className="text-4xl font-bold text-[#14532d] mt-2">{stats.students}</p></div>
+                <div className="bg-orange-400 p-6 rounded-2xl shadow-sm border border-slate-900"><h3 className="text-slate-800 font-bold text-sm uppercase">Teachers (Primary)</h3><p className="text-4xl font-bold text-[#14532d] mt-2">{stats.teachers}</p></div>
+                <div className="bg-orange-400 p-6 rounded-2xl shadow-sm border border-slate-900"><h3 className="text-slate-800 font-bold text-sm uppercase">Pending Approvals</h3><p className="text-4xl font-bold text-yellow-600 mt-2">{stats.pendingResults}</p></div>
               </div>
             </div>
           )}
@@ -317,7 +317,7 @@ const HeadTeacherDashboard = () => {
           {/* --- NEW: NEWS & UPDATES TAB --- */}
           {activeTab === 'updates' && (
             <div className="space-y-6 animate-in fade-in">
-                <h1 className="text-2xl font-bold text-green-900">Manage News & Updates</h1>
+                <h1 className="text-2xl font-bold text-slate-900">Manage News & Updates</h1>
                 
                 {/* POST NEW UPDATE */}
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-green-100 flex flex-col md:flex-row gap-4 items-end">
@@ -335,16 +335,16 @@ const HeadTeacherDashboard = () => {
                         <label className="text-xs font-bold text-gray-400 uppercase">Date</label>
                         <input type="date" className="w-full p-3 bg-gray-50 border rounded-xl" value={newUpdate.event_date} onChange={e => setNewUpdate({...newUpdate, event_date: e.target.value})} />
                     </div>
-                    <button onClick={postUpdate} disabled={loading} className="px-6 py-3 bg-[#14532d] text-white font-bold rounded-xl hover:bg-green-900 flex items-center gap-2">{loading ? 'Posting...' : <><Plus size={18}/> Post</>}</button>
+                    <button onClick={postUpdate} disabled={loading} className="px-6 py-3 bg-orange-400 text-slate-800 font-bold rounded-xl hover:bg-orange-600 flex items-center gap-2">{loading ? 'Posting...' : <><Plus size={18}/> Post</>}</button>
                 </div>
 
                 {/* LIST OF UPDATES */}
                 <div className="bg-white rounded-2xl shadow-sm border border-green-100 overflow-hidden">
                     <table className="w-full text-left text-sm">
-                        <thead className="bg-[#14532d] text-white">
+                        <thead className="bg-orange-400 text-white">
                             <tr><th className="p-4">Title</th><th className="p-4">Category</th><th className="p-4">Date</th><th className="p-4 text-right">Action</th></tr>
                         </thead>
-                        <tbody className="divide-y divide-green-50">
+                        <tbody className="divide-y divide-orange-500">
                             {updates.map(update => (
                                 <tr key={update.id} className="hover:bg-green-50/50">
                                     <td className="p-4 font-bold">{update.title}</td>
