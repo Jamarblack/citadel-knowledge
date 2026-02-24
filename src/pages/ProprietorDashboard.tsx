@@ -51,6 +51,8 @@ const ProprietorDashboard = () => {
     fetchProprietorProfile();
     fetchConfig();
     fetchUpdates();
+    fetchStaffList();
+    fetchStudentList();
   }, []);
 
   // --- AUTO-GENERATORS ---
@@ -111,12 +113,14 @@ const ProprietorDashboard = () => {
   };
 
   const fetchStaffList = async () => {
-    const { data } = await supabase.from('staff').select('*').order('created_at', { ascending: false });
+    const { data, error } = await supabase.from('staff').select('*').order('full_name', { ascending: true });
+    if (error) console.error("Error fetching staff:", error);
     setStaffList(data || []);
   };
 
   const fetchStudentList = async () => {
-    const { data } = await supabase.from('students').select('*').order('created_at', { ascending: false });
+    const { data, error } = await supabase.from('students').select('*').order('full_name', { ascending: true });
+    if (error) console.error("Error fetching students:", error);
     setStudentList(data || []);
   };
 
@@ -199,6 +203,7 @@ const ProprietorDashboard = () => {
       setStaffForm({ name: '', role: 'Teacher', email: '', password: '', section: '', assigned_class: '' });
       generateStaffPin();
       fetchStats();
+      fetchStaffList(); // refresh list
     } catch (error: any) { toast.error(error.message); } 
     finally { setLoading(false); }
   };
@@ -222,6 +227,7 @@ const ProprietorDashboard = () => {
       setStudentForm({ name: '', gender: '', admission_no: '', class: '', dob: '', parent_phone: '', parent_phone_2: '', password: '' });
       generateStudentPin();
       fetchStats();
+      fetchStudentList(); // refresh list
     } catch (error: any) { toast.error(error.message); } 
     finally { setLoading(false); }
   };
@@ -271,15 +277,17 @@ const ProprietorDashboard = () => {
 
   const getFilteredStudents = () => {
     return studentList.filter(student => {
+      const stuClass = student.current_class || ""; // Safe Fallback
+
       if (filterSection !== "All") {
-        const isPrimary = student.current_class.includes("Creche") || student.current_class.includes("KG") || student.current_class.includes("Pry");
-        const isSecondary = student.current_class.includes("JSS") || student.current_class.includes("SS");
+        const isPrimary = stuClass.includes("Creche") || stuClass.includes("KG") || stuClass.includes("Pry");
+        const isSecondary = stuClass.includes("JSS") || stuClass.includes("SS");
         
         if (filterSection === "Primary" && !isPrimary) return false;
         if (filterSection === "Secondary" && !isSecondary) return false;
       }
       
-      if (filterClass !== "All" && student.current_class !== filterClass) {
+      if (filterClass !== "All" && stuClass !== filterClass) {
         return false;
       }
 
@@ -288,7 +296,6 @@ const ProprietorDashboard = () => {
   };
 
   const filteredStudents = getFilteredStudents();
-
 
   // --- SIDEBAR ---
   const SidebarContent = () => (
@@ -314,9 +321,9 @@ const ProprietorDashboard = () => {
           { id: 'register-student', label: 'Register Student', icon: GraduationCap },
           { id: 'staff-list', label: 'Staff Database', icon: Users },
           { id: 'student-list', label: 'Student Database', icon: Users },
-          { id: 'updates', label: 'News & Events', icon: Megaphone }, // NEW
+          { id: 'updates', label: 'News & Events', icon: Megaphone },
           { id: 'settings', label: 'Global Settings', icon: Settings },
-          { id: 'config', label: 'School Calendar', icon: Calendar }, // NEW
+          { id: 'config', label: 'School Config', icon: Calendar },
           { id: 'profile', label: 'My Profile', icon: Users },
         ].map(item => (
           <button key={item.id} onClick={() => { setActiveTab(item.id); if(item.id==='staff-list') fetchStaffList(); if(item.id==='student-list') fetchStudentList(); setIsMobileMenuOpen(false); }}
@@ -404,7 +411,48 @@ const ProprietorDashboard = () => {
           {/* STAFF LIST */}
           {activeTab === 'staff-list' && (
             <div className="bg-white rounded-3xl shadow-lg border border-[#d4af37]/20 overflow-hidden animate-in fade-in">
-               <div className="overflow-x-auto"><table className="w-full text-left"><thead className="bg-[#2c0a0e] text-[#fcf6ba]"><tr><th className="p-4">Name</th><th className="p-4">Role</th><th className="p-4">Email</th><th className="p-4">PIN</th><th className="p-4">Action</th></tr></thead><tbody>{staffList.map(s => (<tr key={s.id} className="border-b"><td className="p-4">{s.full_name}</td><td className="p-4">{s.role}</td><td className="p-4">{s.email}</td><td className="p-4 font-mono">{s.password_text}</td><td className="p-4"><button onClick={() => handleDelete('staff', s.id)} className="text-red-600"><Trash2 size={16}/></button></td></tr>))}</tbody></table></div>
+               <div className="overflow-x-auto">
+                 <table className="w-full text-left">
+                   <thead className="bg-[#2c0a0e] text-[#fcf6ba]">
+                     <tr>
+                       <th className="p-4">Name</th>
+                       <th className="p-4">Role</th>
+                       <th className="p-4">Assigned Class</th>
+                       <th className="p-4">Email</th>
+                       <th className="p-4">PIN</th>
+                       <th className="p-4">Action</th>
+                     </tr>
+                   </thead>
+                   <tbody>
+                     {staffList.map(s => (
+                       <tr key={s.id} className="border-b hover:bg-[#fcf6ba]/10 transition-colors">
+                         <td className="p-4 font-bold text-[#2c0a0e]">{s.full_name}</td>
+                         <td className="p-4">
+                           <span className="bg-gray-100 text-gray-700 px-2 py-1 rounded text-xs font-bold uppercase tracking-wider">
+                             {s.role}
+                           </span>
+                         </td>
+                         <td className="p-4">
+                           {s.role === 'Teacher' ? (
+                             <span className="bg-[#d4af37]/20 text-[#2c0a0e] px-3 py-1 rounded-full text-xs font-bold">
+                               {s.assigned_class ? `${s.assigned_class}` : `Subject Teacher (${s.section || 'N/A'})`}
+                             </span>
+                           ) : (
+                             <span className="text-gray-400 text-xs italic">N/A</span>
+                           )}
+                         </td>
+                         <td className="p-4 text-gray-600">{s.email}</td>
+                         <td className="p-4 font-mono text-gray-500">{s.password_text}</td>
+                         <td className="p-4">
+                           <button onClick={() => handleDelete('staff', s.id)} className="text-red-500 hover:text-red-700 hover:bg-red-50 p-2 rounded-lg transition-colors">
+                             <Trash2 size={18}/>
+                           </button>
+                         </td>
+                       </tr>
+                     ))}
+                   </tbody>
+                 </table>
+               </div>
             </div>
           )}
 

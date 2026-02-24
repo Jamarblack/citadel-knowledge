@@ -3,7 +3,8 @@ import { useNavigate } from "react-router-dom";
 import { 
   LayoutDashboard, Users, FileCheck, LogOut, 
   Menu, CheckCircle, XCircle, User, AlertTriangle, 
-  Camera, Settings, Calendar, Megaphone, Trash2, Plus
+  Camera, Settings, Calendar, Megaphone, Trash2, Plus,
+  GraduationCap
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
@@ -26,6 +27,7 @@ const PrincipalDashboard = () => {
   // Data States
   const [stats, setStats] = useState({ students: 0, teachers: 0, pendingResults: 0 });
   const [studentList, setStudentList] = useState<any[]>([]);
+  const [teacherList, setTeacherList] = useState<any[]>([]);
   const [pendingBatches, setPendingBatches] = useState<ResultBatch[]>([]);
   
   // Settings & Updates State
@@ -46,6 +48,7 @@ const PrincipalDashboard = () => {
     fetchProfile(id!);
     fetchStats();
     fetchStudents();
+    fetchTeachers();
     fetchPendingResults();
     fetchConfig();
     fetchUpdates();
@@ -97,7 +100,6 @@ const PrincipalDashboard = () => {
     if (!newResumptionDate) return;
     setLoading(true);
     
-    // Upsert for both sections to keep them synced
     const { error: error1 } = await supabase.from('school_config').upsert({ section_type: 'Secondary', next_term_begins: newResumptionDate }, { onConflict: 'section_type' });
     const { error: error2 } = await supabase.from('school_config').upsert({ section_type: 'Primary', next_term_begins: newResumptionDate }, { onConflict: 'section_type' });
     
@@ -129,15 +131,20 @@ const PrincipalDashboard = () => {
 
   // --- DATA FETCHERS ---
   const fetchStats = async () => {
-    const { count: sCount } = await supabase.from('students').select('*', { count: 'exact', head: true }).like('current_class', '%SS%'); 
+    const { count: sCount } = await supabase.from('students').select('*', { count: 'exact', head: true }).or('current_class.ilike.%SS%,current_class.ilike.%JSS%'); 
     const { count: tCount } = await supabase.from('staff').select('*', { count: 'exact', head: true }).eq('role', 'Teacher').eq('section', 'Secondary');
     const { count: rCount } = await supabase.from('results').select('*', { count: 'exact', head: true }).eq('status', 'pending');
     setStats({ students: sCount || 0, teachers: tCount || 0, pendingResults: rCount || 0 });
   };
 
   const fetchStudents = async () => {
-    const { data } = await supabase.from('students').select('*').like('current_class', '%SS%').order('current_class');
+    const { data } = await supabase.from('students').select('*').or('current_class.ilike.%SS%,current_class.ilike.%JSS%').order('full_name', { ascending: true });
     setStudentList(data || []);
+  };
+
+  const fetchTeachers = async () => {
+    const { data } = await supabase.from('staff').select('*').eq('role', 'Teacher').eq('section', 'Secondary').order('full_name', { ascending: true });
+    setTeacherList(data || []);
   };
 
   const fetchPendingResults = async () => {
@@ -181,12 +188,13 @@ const PrincipalDashboard = () => {
          <h3 className="font-bold text-lg mt-3 truncate">{principalProfile?.full_name || 'Principal'}</h3>
          <span className="text-[10px] bg-blue-900/50 text-blue-200 px-3 py-0.5 rounded-full uppercase tracking-wider">Administration</span>
       </div>
-      <nav className="flex-1 px-4 py-6 space-y-2">
+      <nav className="flex-1 px-4 py-6 space-y-2 overflow-y-auto custom-scrollbar">
         {[
           { id: 'overview', label: 'Overview', icon: LayoutDashboard },
           { id: 'approvals', label: 'Approve Results', icon: FileCheck },
           { id: 'updates', label: 'News & Events', icon: Megaphone },
-          { id: 'students', label: 'Students', icon: Users },
+          { id: 'students', label: 'Secondary Students', icon: Users },
+          { id: 'teachers', label: 'Secondary Teachers', icon: GraduationCap },
           { id: 'settings', label: 'Settings', icon: Settings }, 
         ].map(item => (
           <button key={item.id} onClick={() => { setActiveTab(item.id); setIsMobileMenuOpen(false); }}
@@ -204,6 +212,7 @@ const PrincipalDashboard = () => {
     <div className="min-h-screen bg-slate-50 flex font-sans">
       <SEO title="Principal Portal | Citadel" description="Academic Admin" noindex={true} />
       
+      {/* CONFIRM MODAL */}
       {confirmAction && selectedBatch && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in">
            <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 animate-in zoom-in-95">
@@ -220,6 +229,7 @@ const PrincipalDashboard = () => {
         </div>
       )}
 
+      {/* BATCH DETAIL MODAL */}
       {selectedBatch && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95">
@@ -259,6 +269,7 @@ const PrincipalDashboard = () => {
               <h1 className="text-2xl font-bold text-gray-800">Dashboard Overview</h1>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-blue-100"><h3 className="text-gray-500 font-bold text-sm uppercase">Students (Sec)</h3><p className="text-4xl font-bold text-blue-900 mt-2">{stats.students}</p></div>
+                <div className="bg-white p-6 rounded-2xl shadow-sm border border-blue-100"><h3 className="text-gray-500 font-bold text-sm uppercase">Teachers (Sec)</h3><p className="text-4xl font-bold text-blue-900 mt-2">{stats.teachers}</p></div>
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-blue-100"><h3 className="text-gray-500 font-bold text-sm uppercase">Pending Approvals</h3><p className="text-4xl font-bold text-orange-500 mt-2">{stats.pendingResults}</p></div>
               </div>
             </div>
@@ -273,7 +284,7 @@ const PrincipalDashboard = () => {
              </div>
           )}
 
-          {/* --- NEW: NEWS & UPDATES TAB --- */}
+          {/* --- NEWS & UPDATES TAB --- */}
           {activeTab === 'updates' && (
             <div className="space-y-6 animate-in fade-in">
                 <h1 className="text-2xl font-bold text-gray-800">Manage News & Updates</h1>
@@ -319,7 +330,77 @@ const PrincipalDashboard = () => {
             </div>
           )}
 
-          {activeTab === 'students' && (<div className="bg-white rounded-2xl shadow-sm border p-6"><p>Student List...</p></div>)}
+          {/* --- NEW: SECONDARY STUDENTS TAB --- */}
+          {activeTab === 'students' && (
+            <div className="space-y-6 animate-in fade-in">
+               <h1 className="text-2xl font-bold text-gray-800">Secondary Students Database</h1>
+               <div className="bg-white rounded-2xl shadow-sm border border-blue-100 overflow-hidden">
+                 <table className="w-full text-left text-sm">
+                   <thead className="bg-[#1e3a8a] text-white">
+                     <tr><th className="p-4">Student</th><th className="p-4">Class</th><th className="p-4">Admission No</th><th className="p-4">Date of Birth</th><th className="p-4">Parent Phone</th></tr>
+                   </thead>
+                   <tbody className="divide-y divide-blue-50">
+                     {studentList.map(s => (
+                       <tr key={s.id} className="hover:bg-blue-50/50">
+                         <td className="p-4 flex items-center gap-3">
+                           <div className="w-10 h-10 rounded-full bg-blue-100 overflow-hidden shrink-0">
+                             {s.passport_url ? <img src={s.passport_url} className="w-full h-full object-cover"/> : <span className="flex items-center justify-center h-full font-bold text-blue-700">{s.full_name[0]}</span>}
+                           </div>
+                           <span className="font-bold text-gray-900">{s.full_name}</span>
+                         </td>
+                         <td className="p-4">{s.current_class}</td>
+                         <td className="p-4 font-mono text-sm">{s.admission_number}</td>
+                         <td className="p-4">{s.dob || 'N/A'}</td>
+                         <td className="p-4">{s.parent_phone}</td>
+                       </tr>
+                     ))}
+                     {studentList.length === 0 && <tr><td colSpan={5} className="p-8 text-center text-gray-400">No secondary students found.</td></tr>}
+                   </tbody>
+                 </table>
+               </div>
+            </div>
+          )}
+
+          {/* --- NEW: SECONDARY TEACHERS TAB --- */}
+          {activeTab === 'teachers' && (
+            <div className="space-y-6 animate-in fade-in">
+               <h1 className="text-2xl font-bold text-gray-800">Secondary Teachers Database</h1>
+               <div className="bg-white rounded-2xl shadow-sm border border-blue-100 overflow-hidden">
+                 <table className="w-full text-left text-sm">
+                   <thead className="bg-[#1e3a8a] text-white">
+                     <tr>
+                       <th className="p-4">Name</th>
+                       <th className="p-4">Role</th>
+                       <th className="p-4">Assigned Class</th>
+                       <th className="p-4">Email</th>
+                       <th className="p-4">PIN</th>
+                     </tr>
+                   </thead>
+                   <tbody className="divide-y divide-blue-50">
+                     {teacherList.map(t => (
+                       <tr key={t.id} className="hover:bg-blue-50/50 transition-colors">
+                         <td className="p-4 flex items-center gap-3">
+                           <div className="w-10 h-10 rounded-full bg-blue-100 overflow-hidden shrink-0">
+                             {t.passport_url ? <img src={t.passport_url} className="w-full h-full object-cover"/> : <span className="flex items-center justify-center h-full font-bold text-blue-700">{t.full_name[0]}</span>}
+                           </div>
+                           <span className="font-bold text-gray-900">{t.full_name}</span>
+                         </td>
+                         <td className="p-4"><span className="bg-gray-100 text-gray-700 px-2 py-1 rounded text-xs font-bold uppercase tracking-wider">{t.role}</span></td>
+                         <td className="p-4">
+                           <span className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-xs font-bold">
+                             {t.assigned_class ? `${t.assigned_class}` : `Subject Teacher (${t.section || 'N/A'})`}
+                           </span>
+                         </td>
+                         <td className="p-4 text-gray-600">{t.email}</td>
+                         <td className="p-4 font-mono text-gray-500">{t.password_text}</td>
+                       </tr>
+                     ))}
+                     {teacherList.length === 0 && <tr><td colSpan={5} className="p-8 text-center text-gray-400">No secondary teachers found.</td></tr>}
+                   </tbody>
+                 </table>
+               </div>
+            </div>
+          )}
 
           {/* --- SETTINGS TAB (Resumption Date) --- */}
           {activeTab === 'settings' && (
