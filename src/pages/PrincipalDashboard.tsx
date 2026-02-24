@@ -334,7 +334,7 @@ const PrincipalDashboard = () => {
           {activeTab === 'students' && (
             <div className="space-y-6 animate-in fade-in">
                <h1 className="text-2xl font-bold text-gray-800">Secondary Students Database</h1>
-               <div className="bg-white rounded-2xl shadow-sm border border-blue-100 overflow-hidden">
+               <div className="bg-white rounded-2xl shadow-sm border border-blue-100 overflow-x-auto">
                  <table className="w-full text-left text-sm">
                    <thead className="bg-[#1e3a8a] text-white">
                      <tr><th className="p-4">Student</th><th className="p-4">Class</th><th className="p-4">Admission No</th><th className="p-4">Date of Birth</th><th className="p-4">Parent Phone</th></tr>
@@ -365,8 +365,8 @@ const PrincipalDashboard = () => {
           {activeTab === 'teachers' && (
             <div className="space-y-6 animate-in fade-in">
                <h1 className="text-2xl font-bold text-gray-800">Secondary Teachers Database</h1>
-               <div className="bg-white rounded-2xl shadow-sm border border-blue-100 overflow-hidden">
-                 <table className="w-full text-left text-sm">
+               <div className="bg-white rounded-2xl shadow-sm border border-blue-100 overflow-x-auto">
+                 <table className="w-full text-left text-sm ">
                    <thead className="bg-[#1e3a8a] text-white">
                      <tr>
                        <th className="p-4">Name</th>
