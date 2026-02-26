@@ -340,12 +340,12 @@ const ProprietorDashboard = () => {
   );
 
   return (
-    <div className="min-h-screen bg-[#f8f5f2] font-sans flex">
+    <div className="min-h-[100dvh] bg-[#f8f5f2] font-sans flex">
       <SEO title="Proprietor Dashboard | Citadel" description="Admin Area" noindex={true} />
-      <aside className="hidden lg:flex w-72 flex-col z-20 shadow-2xl sticky top-0 h-screen bg-gradient-to-b from-[#bf953f] via-[#fcf6ba] to-[#b38728] border-r border-[#b38728]"><SidebarContent /></aside>
+      <aside className="hidden lg:flex w-72 flex-col z-20 shadow-2xl sticky top-0 h-[100dvh] bg-gradient-to-b from-[#bf953f] via-[#fcf6ba] to-[#b38728] border-r border-[#b38728]"><SidebarContent /></aside>
       <Sheet open={isMobileMenuOpen} onOpenChange={setIsMobileMenuOpen}><SheetContent side="left" className="p-0 w-72 border-r border-[#b38728] bg-gradient-to-b from-[#bf953f] via-[#fcf6ba] to-[#b38728]"><SidebarContent /></SheetContent></Sheet>
 
-      <main className="flex-1 h-screen overflow-y-auto">
+      <main className="flex-1 h-[100dvh] overflow-y-auto">
         <header className="lg:hidden p-4 bg-[#fcf6ba] border-b border-[#b38728] flex justify-between items-center sticky top-0 z-20">
           <button onClick={() => setIsMobileMenuOpen(true)}><Menu className="text-[#2c0a0e]" /></button>
           <span className="font-serif font-bold text-[#2c0a0e]"> <img src={logo} alt="School Logo" className="w-8 h-8 inline rounded-full mr-2" /> Proprietor Portal</span>
@@ -426,7 +426,16 @@ const ProprietorDashboard = () => {
                    <tbody>
                      {staffList.map(s => (
                        <tr key={s.id} className="border-b hover:bg-[#fcf6ba]/10 transition-colors">
-                         <td className="p-4 font-bold text-[#2c0a0e]">{s.full_name}</td>
+                         <td className="p-4 flex items-center gap-3">
+                           <div className="w-10 h-10 rounded-full bg-gray-100 overflow-hidden shrink-0 border border-gray-200 flex items-center justify-center">
+                             {s.passport_url ? (
+                               <img src={s.passport_url} className="w-full h-full object-cover" alt={`${s.full_name}'s profile`} />
+                             ) : (
+                               <span className="font-bold text-gray-400">{s.full_name ? s.full_name[0] : '?'}</span>
+                             )}
+                           </div>
+                           <span className="font-bold text-[#2c0a0e]">{s.full_name}</span>
+                         </td>
                          <td className="p-4">
                            <span className="bg-gray-100 text-gray-700 px-2 py-1 rounded text-xs font-bold uppercase tracking-wider">
                              {s.role}
@@ -435,7 +444,7 @@ const ProprietorDashboard = () => {
                          <td className="p-4">
                            {s.role === 'Teacher' ? (
                              <span className="bg-[#d4af37]/20 text-[#2c0a0e] px-3 py-1 rounded-full text-xs font-bold">
-                               {s.assigned_class ? `${s.assigned_class}` : `Subject Teacher (${s.section || 'N/A'})`}
+                               {s.assigned_class ? `${s.assigned_class} (${s.section})` : `Subject Teacher (${s.section || 'N/A'})`}
                              </span>
                            ) : (
                              <span className="text-gray-400 text-xs italic">N/A</span>
