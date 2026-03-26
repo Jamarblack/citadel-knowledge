@@ -1,63 +1,126 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { 
-  LayoutDashboard, LogOut, Menu, Camera, 
-  FileEdit, BookOpen, CheckCircle, AlertCircle, Save
+  LogOut, LayoutDashboard, Upload, Save, User, 
+  BookOpen, Calendar, CheckCircle, Search, X, Menu, Camera
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import SEO from "@/components/SEO";
-import logo from "/school-logo.png";
+import Logo from "/school-logo.png"; 
+
+// --- CONSTANTS ---
+const PSYCHOMOTOR_KEYS = ["Handwriting", "Sports", "Fluency", "Drawing", "Handling Tools"];
+const AFFECTIVE_KEYS = ["Punctuality", "Neatness", "Politeness", "Honesty", "Leadership", "Attentiveness"];
 
 const TeacherDashboard = () => {
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState("upload");
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState("my_class");
   const [teacherProfile, setTeacherProfile] = useState<any>(null);
-  const [uploading, setUploading] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [loading, setLoading] = useState(false);
-  
-  const [students, setStudents] = useState<any[]>([]);
-  const [selectedClass, setSelectedClass] = useState("");
-  const [selectedSubject, setSelectedSubject] = useState("");
-  const [myUploadedResults, setMyUploadedResults] = useState<any[]>([]);
+  const [uploading, setUploading] = useState(false);
 
-  // Score Inputs
-  const [selectedStudentId, setSelectedStudentId] = useState("");
-  const [ca1, setCa1] = useState("");
-  const [ca2, setCa2] = useState("");
-  const [exam, setExam] = useState("");
+  // Data
+  const [myClassStudents, setMyClassStudents] = useState<any[]>([]);
+  const [selectedStudent, setSelectedStudent] = useState<any>(null);
+  
+  // Upload States
+  const [uploadClass, setUploadClass] = useState("");
+  const [uploadSubject, setUploadSubject] = useState("");
+  const [uploadStudents, setUploadStudents] = useState<any[]>([]);
+  const [scoreEntries, setScoreEntries] = useState<any[]>([]);
+  const [subjects, setSubjects] = useState<any[]>([]);
+
+  // Report Modal
+  const [reportData, setReportData] = useState<any>({ attendance: { open: 110, present: 0, absent: 0 }, psychomotor: {}, affective: {}, remark: "" });
+  const [studentGrades, setStudentGrades] = useState<any[]>([]);
 
   useEffect(() => {
     const id = localStorage.getItem('staffId');
-    if (!id) {
-      navigate('/');
-      return;
-    }
-    fetchProfile(id);
-    fetchMyResults(id);
+    if (!id) navigate('/');
+    fetchProfile(id!);
+    fetchSubjects();
   }, []);
 
   const fetchProfile = async (id: string) => {
     const { data } = await supabase.from('staff').select('*').eq('id', id).single();
     if (data) {
       setTeacherProfile(data);
-      if (data.assigned_class) {
-        setSelectedClass(data.assigned_class);
-        fetchStudentsForClass(data.assigned_class);
-      }
+      if (data.assigned_class) fetchMyClass(data.assigned_class);
     }
   };
 
-  const fetchStudentsForClass = async (className: string) => {
-    const { data } = await supabase.from('students').select('*').eq('current_class', className).order('full_name');
-    if (data) setStudents(data);
+  const fetchSubjects = async () => {
+    const { data } = await supabase.from('subjects').select('*').order('name');
+    if (data) setSubjects(data);
   };
 
-  const fetchMyResults = async (teacherId: string) => {
-    const { data } = await supabase.from('results').select('*').eq('teacher_id', teacherId).order('created_at', { ascending: false });
-    if (data) setMyUploadedResults(data);
+  const fetchMyClass = async (className: string) => {
+    const { data } = await supabase.from('students').select('*').eq('current_class', className).order('full_name');
+    if (data) setMyClassStudents(data);
+  };
+
+  // --- PROFILE UPLOAD ---
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (!event.target.files?.length || !teacherProfile) return;
+    setUploading(true);
+    try {
+        const file = event.target.files[0];
+        const fileExt = file.name.split('.').pop();
+        const filePath = `staff_${teacherProfile.id}_${Math.random()}.${fileExt}`;
+        
+        const { error: uploadError } = await supabase.storage.from('passports').upload(filePath, file);
+        if (uploadError) throw uploadError;
+        
+        const { data: { publicUrl } } = supabase.storage.from('passports').getPublicUrl(filePath);
+        
+        const { error: updateError } = await supabase.from('staff').update({ passport_url: publicUrl }).eq('id', teacherProfile.id);
+        if (updateError) throw updateError;
+        
+        setTeacherProfile({ ...teacherProfile, passport_url: publicUrl });
+        toast.success("Profile Photo Updated");
+    } catch (e: any) {
+        toast.error("Upload failed: " + e.message);
+    } finally {
+        setUploading(false);
+    }
+  };
+
+  // --- REPORT CARD LOGIC ---
+  const openStudentReport = async (student: any) => {
+    setSelectedStudent(student);
+    const { data: grades } = await supabase.from('results').select('subject, total_score, grade').eq('student_id', student.id).eq('term', '1st Term').eq('session', '2025/2026');
+    setStudentGrades(grades || []);
+
+    const { data: existingReport } = await supabase.from('term_reports').select('*').eq('student_id', student.id).eq('term', '1st Term').maybeSingle();
+    
+    if (existingReport) {
+      setReportData({
+        attendance: { open: existingReport.days_school_open || 110, present: existingReport.days_present || 0, absent: existingReport.days_absent || 0 },
+        psychomotor: existingReport.psychomotor_skills || {},
+        affective: existingReport.affective_skills || {},
+        remark: existingReport.class_teacher_remark || ""
+      });
+    } else {
+      setReportData({ attendance: { open: 110, present: 0, absent: 0 }, psychomotor: {}, affective: {}, remark: "" });
+    }
+  };
+
+  const saveReportDetails = async () => {
+    if (!selectedStudent) return;
+    setLoading(true);
+    try {
+        const payload = {
+            student_id: selectedStudent.id, session: '2025/2026', term: '1st Term', class_level: teacherProfile.assigned_class,
+            days_school_open: reportData.attendance.open, days_present: reportData.attendance.present, days_absent: reportData.attendance.absent,
+            psychomotor_skills: reportData.psychomotor, affective_skills: reportData.affective, class_teacher_remark: reportData.remark
+        };
+        const { error } = await supabase.from('term_reports').upsert(payload, { onConflict: 'student_id, session, term' });
+        if (error) throw error;
+        toast.success("Saved!"); setSelectedStudent(null);
+    } catch (e: any) { toast.error(e.message); } finally { setLoading(false); }
   };
 
   // --- AUTOMATIC GRADING SYSTEM ---
@@ -82,256 +145,192 @@ const TeacherDashboard = () => {
     }
   };
 
-  const handleUploadResult = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedStudentId || !selectedSubject) return toast.error("Please select a student and subject");
+  // --- RESULT UPLOAD LOGIC ---
+  const handleClassSelect = async (className: string) => {
+    setUploadClass(className); setLoading(true);
+    const { data } = await supabase.from('students').select('*').eq('current_class', className).order('full_name');
+    if (data) {
+        setUploadStudents(data);
+        setScoreEntries(data.map(s => ({ student_id: s.id, student_name: s.full_name, admission_number: s.admission_number, ca1: '', ca2: '', exam: '', position: '-', remarks: '' })));
+    }
+    setLoading(false);
+  };
+
+  const handleScoreChange = (index: number, field: string, value: string) => {
+    const newEntries = [...scoreEntries]; newEntries[index][field] = value;
+    const withTotals = newEntries.map(e => ({ ...e, total: (Number(e.ca1)||0) + (Number(e.ca2)||0) + (Number(e.exam)||0) }));
+    const sorted = [...withTotals].sort((a,b) => b.total - a.total);
     
+    setScoreEntries(withTotals.map(e => {
+        const rank = sorted.findIndex(s => s.total === e.total) + 1;
+        const s = ["th","st","nd","rd"], v = rank%100;
+        
+        // Use our dynamic grading function!
+        const { grade, remark } = calculateGradeAndRemark(e.total, uploadClass);
+
+        return { 
+            ...e, 
+            grade, 
+            remarks: remark,
+            position: e.total > 0 ? rank+(s[(v-20)%10]||s[v]||s[0]) : '-' 
+        };
+    }));
+  };
+
+  const submitScores = async () => {
+    if (!uploadSubject || !uploadClass) return toast.error("Select Class & Subject");
+    if (scoreEntries.length === 0) return toast.error("No students found in this class.");
+
     setLoading(true);
-    
-    const ca1Score = Number(ca1) || 0;
-    const ca2Score = Number(ca2) || 0;
-    const examScore = Number(exam) || 0;
-    const totalScore = ca1Score + ca2Score + examScore;
-
-    if (totalScore > 100) {
-      setLoading(false);
-      return toast.error("Total score cannot exceed 100!");
-    }
-
-    const student = students.find(s => s.id === selectedStudentId);
-    if (!student) return;
-
-    // Run the Auto-Grader!
-    const { grade, remark } = calculateGradeAndRemark(totalScore, student.current_class);
-
     try {
-      // Check if result already exists for this student + subject + term (Simplified check)
-      const { data: existing } = await supabase.from('results')
-        .select('id')
-        .eq('student_id', selectedStudentId)
-        .eq('subject', selectedSubject)
-        .maybeSingle();
-
-      if (existing) {
-        toast.error("Result already exists for this student and subject!");
-        setLoading(false);
-        return;
-      }
-
-      await supabase.from('results').insert([{
-        student_id: student.id,
-        student_name: student.full_name,
-        admission_number: student.admission_number,
-        class_level: student.current_class,
-        teacher_id: teacherProfile.id,
-        teacher_name: teacherProfile.full_name,
-        subject: selectedSubject,
-        ca1_score: ca1Score,
-        ca2_score: ca2Score,
-        exam_score: examScore,
-        total_score: totalScore,
-        grade: grade,
-        remark: remark,
-        status: 'pending' // Goes to Principal/Head Teacher for approval
-      }]);
-
-      toast.success(`Result submitted for ${student.full_name}! Total: ${totalScore} (${grade})`);
-      
-      // Reset form
-      setCa1(""); setCa2(""); setExam(""); setSelectedStudentId("");
-      fetchMyResults(teacherProfile.id);
-
-    } catch (error: any) {
-      toast.error(error.message);
-    } finally {
-      setLoading(false);
-    }
+        const formatted = scoreEntries.map(e => {
+            const total = (Number(e.ca1)||0)+(Number(e.ca2)||0)+(Number(e.exam)||0);
+            return {
+                student_id: e.student_id, student_name: e.student_name, admission_number: e.admission_number,
+                subject: uploadSubject, class_level: uploadClass, term: '1st Term', session: '2025/2026',
+                teacher_id: teacherProfile.id, teacher_name: teacherProfile.full_name,
+                ca1_score: Number(e.ca1) || 0, ca2_score: Number(e.ca2) || 0, exam_score: Number(e.exam) || 0,
+                total_score: total, // Ensures broadsheet works!
+                grade: e.grade, 
+                position: e.position, remarks: e.remarks, status: 'pending'
+            };
+        });
+        const { error } = await supabase.from('results').insert(formatted);
+        if (error) throw error;
+        toast.success("Results Uploaded Successfully!"); 
+        setUploadClass(""); setUploadStudents([]); setScoreEntries([]);
+    } catch(e:any) { toast.error("Upload Failed: " + e.message); } finally { setLoading(false); }
   };
 
-  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    if (!event.target.files?.length || !teacherProfile) return;
-    setUploading(true);
-    try {
-        const file = event.target.files[0];
-        const filePath = `staff_${teacherProfile.id}_${Math.random()}.${file.name.split('.').pop()}`;
-        await supabase.storage.from('passports').upload(filePath, file);
-        const { data: { publicUrl } } = supabase.storage.from('passports').getPublicUrl(filePath);
-        await supabase.from('staff').update({ passport_url: publicUrl }).eq('id', teacherProfile.id);
-        setTeacherProfile({ ...teacherProfile, passport_url: publicUrl }); 
-        toast.success("Profile Photo Updated");
-    } catch (e: any) { 
-        toast.error("Upload failed"); 
-    } finally { 
-        setUploading(false); 
-    }
-  };
-
-  const subjects = [
-    "Mathematics", "English Language", "Basic Science", "Basic Technology", 
-    "Civic Education", "Agricultural Science", "Business Studies", "Social Studies",
-    "Computer Science", "C.R.S", "I.R.S", "P.H.E", "Economics", "Biology",
-    "Physics", "Chemistry", "Government", "Literature in English", "Further Math"
-  ];
+  const filteredSubjects = subjects.filter(sub => sub.section === 'General' || sub.section === (teacherProfile?.section || 'Secondary'));
 
   const SidebarContent = () => (
-    <div className="h-full flex flex-col text-white">
-      <div className="p-8 text-center bg-[#312e81] border-b border-[#1e1b4b]">
-         <div className="w-24 h-24 mx-auto rounded-full border-[3px] border-indigo-400 shadow-xl overflow-hidden bg-[#1e1b4b] relative group">
-             {teacherProfile?.passport_url ? <img src={teacherProfile.passport_url} className="w-full h-full object-cover"/> : <span className="flex items-center justify-center h-full text-2xl font-bold text-indigo-300">T</span>}
-             <label className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"><Camera className="text-white" size={24} /><input type="file" className="hidden" accept="image/*" onChange={handleFileUpload} disabled={uploading} /></label>
-         </div>
-         <h3 className="font-bold text-lg mt-3 truncate">{teacherProfile?.full_name || 'Teacher'}</h3>
-         <span className="text-[10px] bg-indigo-500/50 text-indigo-100 px-3 py-0.5 rounded-full uppercase tracking-wider">
-           {teacherProfile?.assigned_class || 'Subject Teacher'}
-         </span>
-      </div>
-      <nav className="flex-1 px-4 py-6 space-y-2 overflow-y-auto custom-scrollbar">
-        {[
-          { id: 'upload', label: 'Upload Results', icon: FileEdit }, 
-          { id: 'history', label: 'My Uploads', icon: BookOpen }
-        ].map(item => (
-          <button key={item.id} onClick={() => { setActiveTab(item.id); setIsMobileMenuOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all font-medium ${activeTab === item.id ? 'bg-indigo-500 text-white shadow-lg translate-x-1' : 'hover:bg-[#312e81] text-indigo-200'}`}>
-            <item.icon size={20} /> {item.label}
-          </button>
-        ))}
-      </nav>
-      <div className="p-6 bg-[#1e1b4b] mt-auto">
-        <button onClick={() => { localStorage.clear(); navigate('/'); }} className="w-full py-3 bg-red-500/20 hover:bg-red-500 text-red-200 hover:text-white rounded-xl flex items-center justify-center gap-2 font-bold transition-all">
-          <LogOut size={18} /> Logout
-        </button>
-      </div>
+    <div className="h-full flex flex-col">
+       <div className="p-8 text-center bg-amber-50/50 border-b border-amber-100">
+           <div className="w-24 h-24 mx-auto rounded-full bg-amber-900 border-4 border-amber-100 relative group overflow-hidden">
+               {teacherProfile?.passport_url ? <img src={teacherProfile.passport_url} className="w-full h-full object-cover"/> : <span className="flex items-center justify-center h-full text-3xl font-bold text-white">{teacherProfile?.full_name?.[0]}</span>}
+               <label className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer">
+                   <Camera className="text-white" size={24} />
+                   <input type="file" className="hidden" accept="image/*" onChange={handleFileUpload} disabled={uploading} />
+               </label>
+           </div>
+           <h3 className="font-bold text-amber-950 mt-3 truncate px-2">{teacherProfile?.full_name}</h3>
+           <span className="text-xs font-bold text-amber-600 uppercase tracking-widest">{teacherProfile?.section} Teacher</span>
+       </div>
+       <nav className="flex-1 p-4 space-y-2">
+          <button onClick={() => {setActiveTab('my_class'); setIsMobileMenuOpen(false);}} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold transition-all ${activeTab === 'my_class' ? 'bg-amber-900 text-white shadow-lg' : 'text-gray-500 hover:bg-amber-50'}`}><BookOpen size={20} /> My Class</button>
+          <button onClick={() => {setActiveTab('upload'); setIsMobileMenuOpen(false);}} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold transition-all ${activeTab === 'upload' ? 'bg-amber-900 text-white shadow-lg' : 'text-gray-500 hover:bg-amber-50'}`}><Upload size={20} /> Upload Results</button>
+       </nav>
+       <div className="p-4 border-t"><button onClick={() => { localStorage.clear(); navigate('/'); }} className="w-full py-3 text-red-600 font-bold hover:bg-red-50 rounded-xl flex items-center justify-center gap-2"><LogOut size={18} /> Sign Out</button></div>
     </div>
   );
 
   return (
-    <div className="min-h-screen bg-indigo-50/30 flex font-sans">
-      <SEO title="Teacher Portal | Citadel" description="Teacher Area" noindex={true} />
+    <div className="min-h-screen bg-[#f8f5f2] font-sans flex flex-col md:flex-row">
+      <SEO title="Teacher Portal" description="Staff Area" noindex={true} />
       
-      <aside className="hidden lg:block w-72 bg-[#3730a3] shadow-xl sticky top-0 h-screen z-30"><SidebarContent /></aside>
-      <Sheet open={isMobileMenuOpen} onOpenChange={setIsMobileMenuOpen}><SheetContent side="left" className="p-0 w-72 bg-[#3730a3] border-none"><SidebarContent /></SheetContent></Sheet>
+      <header className="md:hidden p-4 bg-white border-b border-amber-100 flex justify-between items-center sticky top-0 z-20">
+        <div className="flex items-center gap-2">
+           <div className="w-8 h-8 rounded-full bg-amber-900 text-white flex items-center justify-center font-bold">
+             {Logo ? <img src={Logo} alt="Logo" className="w-full h-full object-cover rounded-full" /> : (teacherProfile?.full_name?.[0] || 'T')}
+           </div>
+           <span className="font-bold text-amber-950">Staff Portal</span>
+        </div>
+        <button onClick={() => setIsMobileMenuOpen(true)} className="p-2 text-amber-900 bg-amber-50 rounded-lg"><Menu size={24} /></button>
+      </header>
 
-      <main className="flex-1 h-screen overflow-y-auto">
-        <header className="lg:hidden p-4 bg-white border-b flex justify-between items-center sticky top-0 z-20">
-          <button onClick={() => setIsMobileMenuOpen(true)}><Menu className="text-indigo-900" /></button>
-          <span className="font-bold text-indigo-900 text-lg"> <img src={logo} alt="School Logo" className="w-8 h-8 inline-block mr-2" /> Teacher Portal</span>
-        </header>
+      <aside className="hidden md:flex w-72 bg-white border-r border-amber-900/10 flex-col sticky top-0 h-screen z-30 shrink-0"><SidebarContent /></aside>
+      <Sheet open={isMobileMenuOpen} onOpenChange={setIsMobileMenuOpen}><SheetContent side="left" className="p-0 w-72 bg-white border-none"><SidebarContent /></SheetContent></Sheet>
 
-        <div className="p-6 md:p-10 max-w-5xl mx-auto">
-          
-          {activeTab === 'upload' && (
-            <div className="animate-in fade-in space-y-6">
-              <h1 className="text-2xl font-bold text-gray-800">Upload Student Results</h1>
-              <p className="text-gray-500 text-sm">Scores are automatically graded upon submission and sent to the Admin for approval.</p>
+      <main className="flex-1 h-[calc(100vh-65px)] md:h-screen overflow-y-auto">
+        <div className="p-6 md:p-10 max-w-6xl mx-auto">
+           
+           {activeTab === 'my_class' && (
+             <div className="animate-in fade-in space-y-6">
+                <div className="flex justify-between items-center">
+                    <div><h1 className="text-2xl font-bold text-amber-950">Manage Class: {teacherProfile?.assigned_class || 'No Class Assigned'}</h1><p className="text-gray-500 text-sm">Click on a student to enter Attendance, Remarks, and Skills.</p></div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {myClassStudents.map(student => (
+                        <div key={student.id} onClick={() => openStudentReport(student)} className="bg-white p-4 rounded-2xl border border-amber-100 shadow-sm hover:shadow-md cursor-pointer transition-all flex items-center gap-4 group">
+                            <div className="w-16 h-16 rounded-full bg-amber-50 flex items-center justify-center text-amber-800 font-bold text-xl group-hover:bg-amber-900 group-hover:text-white transition-colors">{student.full_name[0]}</div>
+                            <div><h3 className="font-bold text-gray-800">{student.full_name}</h3><p className="text-xs text-gray-400 font-mono">{student.admission_number}</p></div>
+                            <div className="ml-auto text-amber-300 group-hover:text-amber-600"><CheckCircle size={20} /></div>
+                        </div>
+                    ))}
+                </div>
+             </div>
+           )}
 
-              <div className="bg-white p-6 md:p-8 rounded-3xl shadow-sm border border-indigo-100">
-                <form onSubmit={handleUploadResult} className="space-y-6">
-                  
-                  {/* Selection Row */}
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6 p-4 bg-indigo-50/50 rounded-2xl border border-indigo-50">
-                    <div className="space-y-2">
-                      <label className="text-xs font-bold text-indigo-900 uppercase">1. Select Class</label>
-                      <select required value={selectedClass} onChange={(e) => { setSelectedClass(e.target.value); fetchStudentsForClass(e.target.value); }} className="w-full p-3 bg-white border border-indigo-100 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 font-bold text-gray-700">
-                        <option value="">Choose Class</option>
-                        {["Creche", "KG 1", "KG 2", "KG 3", "Pry 1", "Pry 2", "Pry 3", "Pry 4", "Pry 5", "JSS 1", "JSS 2", "JSS 3", "SS 1", "SS 2", "SS 3"].map(c => <option key={c}>{c}</option>)}
-                      </select>
+           {activeTab === 'upload' && (
+             <div className="animate-in fade-in space-y-6">
+                <h1 className="text-2xl font-bold text-amber-950">Upload Result Broadsheet</h1>
+                <div className="bg-white p-6 rounded-2xl shadow-sm border border-amber-100 flex flex-col md:flex-row gap-4 items-end">
+                    <div className="w-full">
+                        <label className="text-xs font-bold text-gray-400 uppercase">Class</label>
+                        <select onChange={(e) => handleClassSelect(e.target.value)} className="w-full p-3 bg-gray-50 border rounded-xl font-bold">
+                            <option value="">-- Select Class --</option>
+                            {[
+                              "JSS 1", "JSS 2", "JSS 3", "SS 1", "SS 2", "SS 3", 
+                              "Primary 1", "Primary 2", "Primary 3", "Primary 4", "Primary 5", 
+                              "KG 1", "KG 2", "Nursery 1", "Nursery 2"
+                            ].map(c => <option key={c} value={c}>{c}</option>)}
+                        </select>
                     </div>
-
-                    <div className="space-y-2">
-                      <label className="text-xs font-bold text-indigo-900 uppercase">2. Select Subject</label>
-                      <select required value={selectedSubject} onChange={(e) => setSelectedSubject(e.target.value)} className="w-full p-3 bg-white border border-indigo-100 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 font-bold text-gray-700">
-                        <option value="">Choose Subject</option>
-                        {subjects.map(s => <option key={s}>{s}</option>)}
-                      </select>
+                    <div className="w-full">
+                        <label className="text-xs font-bold text-gray-400 uppercase">Subject</label>
+                        <select onChange={(e) => setUploadSubject(e.target.value)} className="w-full p-3 bg-gray-50 border rounded-xl font-bold">
+                            <option value="">-- Select Subject --</option>
+                            {filteredSubjects.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
+                        </select>
                     </div>
-
-                    <div className="space-y-2">
-                      <label className="text-xs font-bold text-indigo-900 uppercase">3. Select Student</label>
-                      <select required value={selectedStudentId} onChange={(e) => setSelectedStudentId(e.target.value)} disabled={!selectedClass} className="w-full p-3 bg-white border border-indigo-100 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 font-bold text-gray-700 disabled:opacity-50">
-                        <option value="">Choose Student</option>
-                        {students.map(s => <option key={s.id} value={s.id}>{s.full_name}</option>)}
-                      </select>
+                </div>
+                {uploadStudents.length > 0 && (
+                    <div className="bg-white rounded-2xl shadow-lg border border-amber-100 overflow-hidden">
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-left text-sm">
+                                <thead className="bg-amber-950 text-white"><tr><th className="p-4">Student</th><th className="p-4 w-20 text-center">1st CA</th><th className="p-4 w-20 text-center">2nd CA</th><th className="p-4 w-20 text-center">Exam</th><th className="p-4 w-20 text-center">Total</th><th className="p-4 w-20 text-center">Grade</th></tr></thead>
+                                <tbody>
+                                  {scoreEntries.map((entry, i) => (
+                                    <tr key={entry.student_id} className="border-b">
+                                      <td className="p-4 font-bold">{entry.student_name}</td>
+                                      <td className="p-2"><input type="number" className="w-full p-2 bg-gray-50 border rounded text-center" value={entry.ca1} onChange={e => handleScoreChange(i, 'ca1', e.target.value)}/></td>
+                                      <td className="p-2"><input type="number" className="w-full p-2 bg-gray-50 border rounded text-center" value={entry.ca2} onChange={e => handleScoreChange(i, 'ca2', e.target.value)}/></td>
+                                      <td className="p-2"><input type="number" className="w-full p-2 bg-gray-50 border rounded text-center font-bold text-blue-900" value={entry.exam} onChange={e => handleScoreChange(i, 'exam', e.target.value)}/></td>
+                                      <td className="p-4 text-center font-bold">{(Number(entry.ca1)||0)+(Number(entry.ca2)||0)+(Number(entry.exam)||0)}</td>
+                                      <td className="p-4 text-center font-bold">{entry.grade || '-'}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                            </table>
+                        </div>
+                        <div className="p-4 flex justify-end"><button onClick={submitScores} disabled={loading} className="px-8 py-3 bg-amber-900 text-white font-bold rounded-xl shadow hover:bg-amber-800">{loading ? 'Saving...' : 'Submit Results'}</button></div>
                     </div>
-                  </div>
-
-                  {/* Score Inputs */}
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-4">
-                    <div className="space-y-2">
-                      <label className="text-sm font-bold text-gray-700">First CA Score <span className="text-gray-400 font-normal">(Max 20)</span></label>
-                      <input type="number" min="0" max="20" required value={ca1} onChange={e => setCa1(e.target.value)} className="w-full p-4 bg-gray-50 border border-gray-200 rounded-xl text-lg font-bold outline-none focus:ring-2 focus:ring-indigo-500 text-center" placeholder="0" />
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-sm font-bold text-gray-700">Second CA Score <span className="text-gray-400 font-normal">(Max 20)</span></label>
-                      <input type="number" min="0" max="20" required value={ca2} onChange={e => setCa2(e.target.value)} className="w-full p-4 bg-gray-50 border border-gray-200 rounded-xl text-lg font-bold outline-none focus:ring-2 focus:ring-indigo-500 text-center" placeholder="0" />
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-sm font-bold text-gray-700">Exam Score <span className="text-gray-400 font-normal">(Max 60)</span></label>
-                      <input type="number" min="0" max="60" required value={exam} onChange={e => setExam(e.target.value)} className="w-full p-4 bg-gray-50 border border-gray-200 rounded-xl text-lg font-bold outline-none focus:ring-2 focus:ring-indigo-500 text-center" placeholder="0" />
-                    </div>
-                  </div>
-
-                  {/* Auto Total Display */}
-                  <div className="p-4 bg-indigo-900 text-white rounded-2xl flex justify-between items-center shadow-inner">
-                     <span className="font-bold uppercase tracking-wider text-indigo-200 text-sm">Calculated Total</span>
-                     <span className="text-3xl font-bold">{(Number(ca1) || 0) + (Number(ca2) || 0) + (Number(exam) || 0)} <span className="text-lg text-indigo-300">/ 100</span></span>
-                  </div>
-
-                  <button disabled={loading} type="submit" className="w-full py-4 bg-indigo-600 text-white font-bold rounded-xl shadow-lg hover:bg-indigo-700 transition-all flex justify-center items-center gap-2">
-                    {loading ? 'Submitting...' : <><Save size={20} /> Submit Final Result</>}
-                  </button>
-
-                </form>
-              </div>
-            </div>
-          )}
-
-          {activeTab === 'history' && (
-            <div className="space-y-6 animate-in fade-in">
-               <h1 className="text-2xl font-bold text-gray-800">My Upload History</h1>
-               <div className="bg-white rounded-3xl shadow-sm border border-indigo-100 overflow-hidden">
-                 <div className="overflow-x-auto">
-                   <table className="w-full text-left text-sm">
-                     <thead className="bg-indigo-50 text-indigo-900 border-b border-indigo-100">
-                       <tr>
-                         <th className="p-4">Student</th>
-                         <th className="p-4">Subject</th>
-                         <th className="p-4 text-center">Score</th>
-                         <th className="p-4 text-center">Grade</th>
-                         <th className="p-4">Status</th>
-                       </tr>
-                     </thead>
-                     <tbody className="divide-y divide-gray-50">
-                       {myUploadedResults.map(r => (
-                         <tr key={r.id} className="hover:bg-indigo-50/30 transition-colors">
-                           <td className="p-4 font-bold text-gray-800">
-                             {r.student_name}
-                             <span className="block text-xs text-gray-400 font-normal">{r.class_level}</span>
-                           </td>
-                           <td className="p-4 text-gray-600">{r.subject}</td>
-                           <td className="p-4 text-center font-bold text-indigo-900">{r.total_score}</td>
-                           <td className="p-4 text-center font-bold">{r.grade}</td>
-                           <td className="p-4">
-                             {r.status === 'approved' ? (
-                               <span className="flex items-center gap-1 text-green-600 bg-green-50 px-2 py-1 rounded-full text-xs font-bold w-fit"><CheckCircle size={14}/> Approved</span>
-                             ) : r.status === 'rejected' ? (
-                               <span className="flex items-center gap-1 text-red-600 bg-red-50 px-2 py-1 rounded-full text-xs font-bold w-fit"><AlertCircle size={14}/> Rejected</span>
-                             ) : (
-                               <span className="flex items-center gap-1 text-orange-600 bg-orange-50 px-2 py-1 rounded-full text-xs font-bold w-fit">Pending</span>
-                             )}
-                           </td>
-                         </tr>
-                       ))}
-                       {myUploadedResults.length === 0 && (
-                         <tr><td colSpan={5} className="p-8 text-center text-gray-400">You haven't uploaded any results yet.</td></tr>
-                       )}
-                     </tbody>
-                   </table>
-                 </div>
-               </div>
-            </div>
-          )}
-
+                )}
+             </div>
+           )}
         </div>
       </main>
+
+      {/* MODAL */}
+      {selectedStudent && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 overflow-y-auto">
+            <div className="bg-white w-full max-w-2xl rounded-3xl shadow-2xl overflow-hidden my-10 animate-in zoom-in-95">
+                <div className="bg-amber-50 p-6 flex justify-between items-center border-b border-amber-100">
+                    <div><h2 className="text-xl font-bold text-amber-950">Report Card: {selectedStudent.full_name}</h2></div>
+                    <button onClick={() => setSelectedStudent(null)} className="p-2 hover:bg-white rounded-full"><X size={24}/></button>
+                </div>
+                <div className="p-6 space-y-6 h-[70vh] overflow-y-auto">
+                    <div className="bg-gray-50 p-4 rounded-xl border"><h3 className="text-xs font-bold text-gray-400 uppercase mb-3">Academic Snapshot</h3><div className="grid grid-cols-2 gap-2">{studentGrades.map((g, i) => (<div key={i} className="flex justify-between text-sm p-2 bg-white rounded border"><span>{g.subject}</span><span className="font-bold">{g.total_score} ({g.grade})</span></div>))}</div></div>
+                    <div><h3 className="text-purple-700 font-bold mb-3">Attendance</h3><div className="grid grid-cols-3 gap-4"><div><label className="text-xs font-bold">Opened</label><input type="number" className="w-full p-2 border rounded-lg" value={reportData.attendance.open} onChange={e => setReportData({...reportData, attendance: {...reportData.attendance, open: e.target.value}})}/></div><div><label className="text-xs font-bold">Present</label><input type="number" className="w-full p-2 border rounded-lg" value={reportData.attendance.present} onChange={e => setReportData({...reportData, attendance: {...reportData.attendance, present: e.target.value}})}/></div><div><label className="text-xs font-bold">Absent</label><input type="number" className="w-full p-2 border rounded-lg" value={reportData.attendance.absent} onChange={e => setReportData({...reportData, attendance: {...reportData.attendance, absent: e.target.value}})}/></div></div></div>
+                    <div><h3 className="text-purple-700 font-bold mb-3">Psychomotor (1-5)</h3><div className="grid grid-cols-2 gap-4">{PSYCHOMOTOR_KEYS.map(k => (<div key={k}><label className="text-xs font-bold text-gray-500 uppercase">{k}</label><select className="w-full p-2 border rounded-lg" value={reportData.psychomotor[k]||""} onChange={e => setReportData({...reportData, psychomotor:{...reportData.psychomotor,[k]:e.target.value}})}><option value="">-</option>{[5,4,3,2,1].map(n=><option key={n} value={n}>{n}</option>)}</select></div>))}</div></div>
+                    <div><h3 className="text-purple-700 font-bold mb-3">Affective (1-5)</h3><div className="grid grid-cols-2 gap-4">{AFFECTIVE_KEYS.map(k => (<div key={k}><label className="text-xs font-bold text-gray-500 uppercase">{k}</label><select className="w-full p-2 border rounded-lg" value={reportData.affective[k]||""} onChange={e => setReportData({...reportData, affective:{...reportData.affective,[k]:e.target.value}})}><option value="">-</option>{[5,4,3,2,1].map(n=><option key={n} value={n}>{n}</option>)}</select></div>))}</div></div>
+                    <div><h3 className="text-purple-700 font-bold mb-3">Teacher's Remark</h3><textarea className="w-full p-3 border rounded-xl" rows={3} value={reportData.remark} onChange={e => setReportData({...reportData, remark: e.target.value})}></textarea></div>
+                </div>
+                <div className="p-4 border-t bg-gray-50"><button onClick={saveReportDetails} disabled={loading} className="w-full py-3 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-xl shadow-lg">{loading ? 'Saving...' : 'Save Report Details'}</button></div>
+            </div>
+        </div>
+      )}
     </div>
   );
 };
