@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Users, FileCheck, LogOut, 
   Menu, CheckCircle, XCircle, User, AlertTriangle, 
   Camera, Settings, Calendar, Megaphone, Trash2, Plus,
-  GraduationCap, UserPlus, TrendingUp, Filter, Search
+  GraduationCap, UserPlus, TrendingUp, Filter, Search, FileText, RefreshCw, Download
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
@@ -24,6 +24,7 @@ const PrincipalDashboard = () => {
   const [studentList, setStudentList] = useState<any[]>([]);
   const [teacherList, setTeacherList] = useState<any[]>([]);
   const [pendingBatches, setPendingBatches] = useState<ResultBatch[]>([]);
+  const [globalSettings, setGlobalSettings] = useState({ session: '', term: '' });
   
   const [resumptionDate, setResumptionDate] = useState("");
   const [newResumptionDate, setNewResumptionDate] = useState("");
@@ -45,15 +46,26 @@ const PrincipalDashboard = () => {
   const [promoFrom, setPromoFrom] = useState("");
   const [promoTo, setPromoTo] = useState("");
 
+  // Broadsheet States
+  const [broadsheetData, setBroadsheetData] = useState<any[]>([]);
+  const [broadsheetClass, setBroadsheetClass] = useState("");
+  const [broadsheetSubjects, setBroadsheetSubjects] = useState<string[]>([]);
+  const [loadingBroadsheet, setLoadingBroadsheet] = useState(false);
+
   useEffect(() => {
     const id = localStorage.getItem('staffId');
     if (!id) navigate('/');
-    fetchProfile(id!); fetchStats(); fetchStudents(); fetchTeachers(); fetchPendingResults(); fetchConfig(); fetchUpdates();
+    fetchProfile(id!); fetchStats(); fetchStudents(); fetchTeachers(); fetchPendingResults(); fetchConfig(); fetchUpdates(); fetchSettings();
   }, []);
 
   const fetchProfile = async (id: string) => {
     const { data } = await supabase.from('staff').select('*').eq('id', id).single();
     if (data) setPrincipalProfile(data);
+  };
+
+  const fetchSettings = async () => {
+    const { data } = await supabase.from('school_settings').select('*').single();
+    if (data) setGlobalSettings({ session: data.current_session, term: data.current_term });
   };
 
   const fetchUpdates = async () => {
@@ -73,8 +85,8 @@ const PrincipalDashboard = () => {
   const updateResumptionDate = async () => {
     if (!newResumptionDate) return;
     setLoading(true);
-    const { error: error1 } = await supabase.from('school_config').upsert({ section_type: 'Secondary', next_term_begins: newResumptionDate }, { onConflict: 'section_type' });
-    const { error: error2 } = await supabase.from('school_config').upsert({ section_type: 'Primary', next_term_begins: newResumptionDate }, { onConflict: 'section_type' });
+    await supabase.from('school_config').upsert({ section_type: 'Secondary', next_term_begins: newResumptionDate }, { onConflict: 'section_type' });
+    await supabase.from('school_config').upsert({ section_type: 'Primary', next_term_begins: newResumptionDate }, { onConflict: 'section_type' });
     setLoading(false); toast.success("Resumption Date Updated for ALL Students!"); setResumptionDate(newResumptionDate);
   };
 
@@ -115,6 +127,35 @@ const PrincipalDashboard = () => {
       groups[key].results.push(row); groups[key].student_count++;
     });
     setPendingBatches(Object.values(groups));
+  };
+
+  // Broadsheet Fetcher
+  const fetchBroadsheet = async () => {
+    if (!broadsheetClass) return toast.error("Please select a class first.");
+    setLoadingBroadsheet(true);
+    const { data, error } = await supabase.from('results').select('*').eq('class_level', broadsheetClass).eq('status', 'approved');
+    
+    if (error) {
+      toast.error("Failed to load broadsheet.");
+    } else if (data) {
+      const studentsMap: any = {};
+      const subjectsSet = new Set<string>();
+
+      data.forEach(row => {
+        subjectsSet.add(row.subject);
+        if (!studentsMap[row.student_id]) {
+          studentsMap[row.student_id] = { id: row.student_id, name: row.student_name, total: 0, scores: {} };
+        }
+        studentsMap[row.student_id].scores[row.subject] = row.total_score;
+        studentsMap[row.student_id].total += row.total_score;
+      });
+
+      setBroadsheetSubjects(Array.from(subjectsSet));
+      setBroadsheetData(Object.values(studentsMap).sort((a: any, b: any) => b.total - a.total));
+      if(data.length > 0) toast.success("Broadsheet Generated!");
+      else toast.info("No approved results found for this class yet.");
+    }
+    setLoadingBroadsheet(false);
   };
 
   useEffect(() => {
@@ -200,7 +241,18 @@ const PrincipalDashboard = () => {
          <span className="text-[10px] bg-blue-900/50 text-blue-200 px-3 py-0.5 rounded-full uppercase tracking-wider">Administration</span>
       </div>
       <nav className="flex-1 px-4 py-6 space-y-2 overflow-y-auto custom-scrollbar">
-        {[{ id: 'overview', label: 'Overview', icon: LayoutDashboard }, { id: 'approvals', label: 'Approve Results', icon: FileCheck }, { id: 'promotions', label: 'Promote Students', icon: TrendingUp }, { id: 'reg-student', label: 'Register Student', icon: GraduationCap }, { id: 'reg-staff', label: 'Register Teacher', icon: UserPlus }, { id: 'updates', label: 'News & Events', icon: Megaphone }, { id: 'students', label: 'Secondary Students', icon: Users }, { id: 'teachers', label: 'Secondary Teachers', icon: GraduationCap }, { id: 'settings', label: 'Settings', icon: Settings }].map(item => (
+        {[
+          { id: 'overview', label: 'Overview', icon: LayoutDashboard }, 
+          { id: 'approvals', label: 'Approve Results', icon: FileCheck }, 
+          { id: 'broadsheet', label: 'Master Broadsheet', icon: FileText }, 
+          { id: 'promotions', label: 'Promote Students', icon: TrendingUp }, 
+          { id: 'reg-student', label: 'Register Student', icon: GraduationCap }, 
+          { id: 'reg-staff', label: 'Register Teacher', icon: UserPlus }, 
+          { id: 'updates', label: 'News & Events', icon: Megaphone }, 
+          { id: 'students', label: 'Secondary Students', icon: Users }, 
+          { id: 'teachers', label: 'Secondary Teachers', icon: GraduationCap }, 
+          { id: 'settings', label: 'Settings', icon: Settings }
+        ].map(item => (
           <button key={item.id} onClick={() => { setActiveTab(item.id); setIsMobileMenuOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all font-medium ${activeTab === item.id ? 'bg-blue-600 text-white shadow-lg translate-x-1' : 'hover:bg-gray-800 text-gray-400'}`}><item.icon size={20} /> {item.label}{item.id === 'approvals' && stats.pendingResults > 0 && <span className="ml-auto bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full animate-pulse">{pendingBatches.length}</span>}</button>
         ))}
       </nav>
@@ -233,6 +285,104 @@ const PrincipalDashboard = () => {
             <div className="animate-in fade-in space-y-6">
               <h1 className="text-2xl font-bold text-gray-800">Dashboard Overview</h1>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6"><div className="bg-white p-6 rounded-2xl shadow-sm border border-blue-100"><h3 className="text-gray-500 font-bold text-sm uppercase">Students (Sec)</h3><p className="text-4xl font-bold text-blue-900 mt-2">{stats.students}</p></div><div className="bg-white p-6 rounded-2xl shadow-sm border border-blue-100"><h3 className="text-gray-500 font-bold text-sm uppercase">Teachers (Sec)</h3><p className="text-4xl font-bold text-blue-900 mt-2">{stats.teachers}</p></div><div className="bg-white p-6 rounded-2xl shadow-sm border border-blue-100"><h3 className="text-gray-500 font-bold text-sm uppercase">Pending Approvals</h3><p className="text-4xl font-bold text-orange-500 mt-2">{stats.pendingResults}</p></div></div>
+            </div>
+          )}
+
+          {activeTab === 'broadsheet' && (
+            <div className="space-y-6 animate-in fade-in">
+              <style>{`
+                @media print {
+                  body * { visibility: hidden; }
+                  #broadsheet-print-area, #broadsheet-print-area * { visibility: visible; }
+                  #broadsheet-print-area { position: absolute; left: 0; top: 0; width: 100%; }
+                  @page { size: landscape; margin: 10mm; }
+                  * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+                  .print-hide { display: none !important; }
+                }
+              `}</style>
+
+              <div className="flex flex-col sm:flex-row sm:justify-between sm:items-end gap-4 print-hide">
+                <div className="space-y-1">
+                  <h1 className="text-2xl font-bold text-gray-800">Master Broadsheet</h1>
+                  <p className="text-gray-500 text-sm">Select a class to generate the official result overview.</p>
+                </div>
+                {broadsheetData.length > 0 && (
+                  <button onClick={() => window.print()} className="w-full sm:w-auto px-6 py-3 bg-[#1e3a8a] text-white font-bold rounded-xl hover:bg-blue-900 transition-all shadow-md flex items-center justify-center gap-2 shrink-0">
+                    <Download size={18} /> Download PDF
+                  </button>
+                )}
+              </div>
+              
+              <div className="flex flex-col sm:flex-row gap-4 bg-white p-4 rounded-2xl shadow-sm border border-blue-100 print-hide">
+                 <select value={broadsheetClass} onChange={e => { setBroadsheetClass(e.target.value); setBroadsheetData([]); }} className="w-full sm:flex-1 p-3 bg-gray-50 border border-gray-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-600 font-bold text-blue-900">
+                    <option value="">-- Select Class to Generate --</option>
+                    {getClassOptions().filter(c=>!c.includes('Graduated')).map(c => <option key={c} value={c}>{c}</option>)}
+                 </select>
+                 <button onClick={fetchBroadsheet} disabled={loadingBroadsheet} className="w-full sm:w-auto px-8 py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition-all shadow-md flex items-center justify-center gap-2">
+                   {loadingBroadsheet ? <RefreshCw className="animate-spin" size={18}/> : <FileText size={18}/>}
+                   {loadingBroadsheet ? 'Generating...' : 'Preview Broadsheet'}
+                 </button>
+              </div>
+
+              {broadsheetData.length > 0 && (
+                <div id="broadsheet-print-area" className="bg-white p-6 md:p-10 rounded-2xl shadow-sm border border-blue-100 relative">
+                  
+                  {/* BEAUTIFUL DOCUMENT HEADER */}
+                  <div className="text-center mb-8 border-b-2 border-[#1e3a8a] pb-6">
+                     <img src={logo} alt="Logo" className="w-20 h-20 mx-auto mb-3" />
+                     <h2 className="text-2xl md:text-3xl font-black uppercase text-[#1e3a8a] tracking-wide">Citadel of Knowledge International School</h2>
+                     <p className="text-md font-bold text-gray-500 mt-1 uppercase tracking-widest">Master Broadsheet Report</p>
+                     
+                     <div className="flex flex-wrap justify-center gap-4 md:gap-12 mt-6 text-sm font-bold text-[#1e3a8a] bg-blue-50 py-3 px-6 rounded-xl border border-blue-100 w-fit mx-auto">
+                        <span>CLASS: <span className="text-gray-700">{broadsheetClass}</span></span>
+                        <span>TERM: <span className="text-gray-700">{globalSettings?.term}</span></span>
+                        <span>SESSION: <span className="text-gray-700">{globalSettings?.session}</span></span>
+                     </div>
+                  </div>
+
+                  {/* DOCUMENT TABLE */}
+                  <div className="overflow-x-auto print:overflow-visible">
+                    <table className="w-full text-left text-sm whitespace-nowrap border-collapse border border-gray-300">
+                      <thead className="bg-[#1e3a8a] text-white">
+                        <tr>
+                          <th className="p-3 border border-gray-300 sticky left-0 bg-[#1e3a8a] z-10">Student Name</th>
+                          {broadsheetSubjects.map(sub => <th key={sub} className="p-3 border border-gray-300 text-center">{sub.substring(0, 8)}.</th>)}
+                          <th className="p-3 font-bold text-yellow-300 border border-gray-300 text-center bg-blue-900">Total</th>
+                          <th className="p-3 font-bold text-green-300 border border-gray-300 text-center bg-blue-900">Pos</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-200">
+                         {broadsheetData.map((student, index) => (
+                           <tr key={student.id} className="hover:bg-blue-50 transition-colors">
+                             <td className="p-3 font-bold text-gray-900 sticky left-0 bg-white border border-gray-300 drop-shadow-[2px_0_2px_rgba(0,0,0,0.02)]">{student.name}</td>
+                             {broadsheetSubjects.map(sub => (
+                               <td key={sub} className="p-3 text-gray-600 border border-gray-300 text-center font-medium">{student.scores[sub] || <span className="text-gray-300">-</span>}</td>
+                             ))}
+                             <td className="p-3 font-bold text-blue-900 bg-blue-50/50 border border-gray-300 text-center">{student.total}</td>
+                             <td className="p-3 font-bold text-green-700 bg-green-50/50 border border-gray-300 text-center">
+                                {index + 1}<sup className="text-[10px] ml-0.5 text-gray-500">{index + 1 === 1 ? 'st' : index + 1 === 2 ? 'nd' : index + 1 === 3 ? 'rd' : 'th'}</sup>
+                             </td>
+                           </tr>
+                         ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* DOCUMENT FOOTER SIGNATURES */}
+                  <div className="mt-20 flex justify-between px-4 text-sm font-bold text-gray-800">
+                     <div className="text-center">
+                       <div className="w-40 md:w-56 border-b-2 border-gray-800 mb-2"></div>
+                       <p>Class Teacher's Signature</p>
+                     </div>
+                     <div className="text-center">
+                       <div className="w-40 md:w-56 border-b-2 border-gray-800 mb-2"></div>
+                       <p>Principal's Signature</p>
+                       <p className="text-xs text-gray-500 font-medium mt-1 uppercase tracking-widest">{principalProfile?.full_name}</p>
+                     </div>
+                  </div>
+
+                </div>
+              )}
             </div>
           )}
 
@@ -302,15 +452,30 @@ const PrincipalDashboard = () => {
             <div className="space-y-6 animate-in fade-in">
                <h1 className="text-2xl font-bold text-gray-800">Secondary Students Database</h1>
                
-               <div className="flex flex-col md:flex-row gap-4 bg-white p-4 rounded-2xl shadow-sm border border-blue-100 mb-6">
+               <div className="flex flex-col lg:flex-row gap-4 bg-white p-4 rounded-2xl shadow-sm border border-blue-100 mb-6">
                  <div className="flex-1 relative">
-                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
-                   <input type="text" placeholder="Search by name or admission number..." value={studentSearch} onChange={e => setStudentSearch(e.target.value)} className="w-full pl-10 p-2 bg-gray-50 border rounded-xl outline-none focus:ring-2 focus:ring-blue-600" />
+                   <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+                   <input 
+                     type="text" 
+                     placeholder="Search by student name or admission number..." 
+                     value={studentSearch} 
+                     onChange={e => setStudentSearch(e.target.value)} 
+                     className="w-full pl-12 p-3 bg-gray-50 border border-gray-200 rounded-xl outline-none text-gray-700 focus:ring-2 focus:ring-blue-600 transition-all" 
+                   />
                  </div>
-                 <div className="flex items-center gap-2">
-                   <Filter size={18} className="text-gray-400 hidden md:block" />
-                   <select value={studentClassFilter} onChange={e => setStudentClassFilter(e.target.value)} className="p-2 bg-gray-50 border rounded-xl outline-none font-medium focus:ring-2 focus:ring-blue-600">
-                     <option value="All">All Classes</option>{getClassOptions().filter(c=>!c.includes('Graduated')).map(c => <option key={c} value={c}>{c}</option>)}
+                 
+                 <div className="flex flex-col sm:flex-row items-center gap-3 w-full lg:w-auto">
+                   <div className="hidden lg:flex items-center gap-2 text-gray-400">
+                     <Filter size={18} className="text-blue-600" />
+                   </div>
+                   
+                   <select 
+                     value={studentClassFilter} 
+                     onChange={e => setStudentClassFilter(e.target.value)} 
+                     className="w-full sm:w-auto p-3 bg-gray-50 border border-gray-200 rounded-xl text-sm font-bold text-gray-700 outline-none cursor-pointer focus:ring-2 focus:ring-blue-600"
+                   >
+                     <option value="All">All Classes</option>
+                     {getClassOptions().filter(c=>!c.includes('Graduated')).map(c => <option key={c} value={c}>{c}</option>)}
                    </select>
                  </div>
                </div>
@@ -335,7 +500,7 @@ const PrincipalDashboard = () => {
           {activeTab === 'teachers' && (
             <div className="space-y-6 animate-in fade-in">
                <h1 className="text-2xl font-bold text-gray-800">Secondary Teachers Database</h1>
-               <div className="flex flex-col md:flex-row gap-4 bg-white p-4 rounded-2xl shadow-sm border border-blue-100 mb-6">
+               <div className="flex flex-col lg:flex-row gap-4 bg-white p-4 rounded-2xl shadow-sm border border-blue-100 mb-6">
                  <div className="flex-1 relative">
                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
                    <input type="text" placeholder="Search teacher by name or email..." value={teacherSearch} onChange={e => setTeacherSearch(e.target.value)} className="w-full pl-10 p-2 bg-gray-50 border rounded-xl outline-none focus:ring-2 focus:ring-blue-600" />
