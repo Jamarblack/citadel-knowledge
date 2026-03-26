@@ -9,6 +9,7 @@ import StudentDashboard from "@/pages/StudentDashboard";
 
 // Admin Dashboards
 import ProprietorDashboard from "@/pages/ProprietorDashboard";
+import ProprietressDashboard from "./pages/proprietressDashbaord";
 import TeacherDashboard from "@/pages/TeacherDashboard";
 import PrincipalDashboard from "@/pages/PrincipalDashboard";
 import HeadTeacherDashboard from "@/pages/HeadTeacherDashboard";
@@ -31,6 +32,7 @@ function App() {
 
           {/* Staff Areas */}
           <Route path="/proprietor-dashboard" element={<ProprietorDashboard />} />
+          <Route path="/proprietress-dashboard" element={<ProprietressDashboard />} />
           <Route path="/teacher-dashboard" element={<TeacherDashboard />} />
           <Route path="/principal-dashboard" element={<PrincipalDashboard />} />
           <Route path="/head-teacher-dashboard" element={<HeadTeacherDashboard />} />

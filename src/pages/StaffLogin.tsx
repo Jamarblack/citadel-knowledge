@@ -21,13 +21,12 @@ const StaffLogin = () => {
     setLoading(true);
 
     try {
-      // 1. Check if staff exists with these credentials
-      // Note: We force email to lowercase here too just to be safe
+   
       const { data, error } = await supabase
         .from('staff')
         .select('*')
         .eq('email', formData.email.toLowerCase())
-        .eq('password_text', formData.password) // Using plain text for simple auth, or swap for proper auth
+        .eq('password_text', formData.password) 
         .single();
 
       if (error || !data) {
@@ -40,13 +39,20 @@ const StaffLogin = () => {
 
       toast.success(`Welcome back, ${data.full_name}!`);
 
-      // 3. Redirect based on Role
-      if (data.role === 'Proprietor') navigate('/proprietor-dashboard');
-      else if (data.role === 'Principal') navigate('/principal-dashboard');
-      else if (data.role === 'Head Teacher') navigate('/head-teacher-dashboard');
-      else if (data.role === 'Bursar') navigate('/bursar-dashboard');
-      else navigate('/teacher-dashboard'); // Default to Teacher Dashboard
-
+    // 3. Redirect based on Role
+if (data.role === 'Proprietor') {
+  navigate('/proprietor-dashboard');
+} else if (data.role === 'Proprietress') {
+  navigate('/proprietress-dashboard');
+} else if (data.role === 'Principal') {
+  navigate('/principal-dashboard');
+} else if (data.role === 'Head Teacher') {
+  navigate('/head-teacher-dashboard');
+} else if (data.role === 'Bursar') {
+  navigate('/bursar-dashboard');
+} else {
+  navigate('/teacher-dashboard');
+}
     } catch (error: any) {
       toast.error(error.message || "Login failed");
     } finally {
