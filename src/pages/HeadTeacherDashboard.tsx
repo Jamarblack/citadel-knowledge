@@ -24,10 +24,13 @@ const HeadTeacherDashboard = () => {
   const [stats, setStats] = useState({ students: 0, teachers: 0, pendingResults: 0 });
   const [studentList, setStudentList] = useState<any[]>([]);
   const [teacherList, setTeacherList] = useState<any[]>([]);
-  const [globalSettings, setGlobalSettings] = useState({ session: '', term: '' });
+  const [globalSettings, setGlobalSettings] = useState({ session: '2025/2026', term: '1st Term' });
   
   const [resumptionDate, setResumptionDate] = useState("");
   const [newResumptionDate, setNewResumptionDate] = useState("");
+  const [newGlobalSession, setNewGlobalSession] = useState("");
+  const [newGlobalTerm, setNewGlobalTerm] = useState("");
+
   const [updates, setUpdates] = useState<any[]>([]);
   const [newUpdate, setNewUpdate] = useState({ title: "", category: "Event", event_date: "" });
 
@@ -62,7 +65,23 @@ const HeadTeacherDashboard = () => {
   
   const fetchSettings = async () => {
     const { data } = await supabase.from('school_settings').select('*').single();
-    if (data) setGlobalSettings({ session: data.current_session, term: data.current_term });
+    if (data) {
+        setGlobalSettings({ session: data.current_session, term: data.current_term });
+        setNewGlobalSession(data.current_session);
+        setNewGlobalTerm(data.current_term);
+    }
+  };
+
+  const updateGlobalSettings = async () => {
+      if (!newGlobalSession || !newGlobalTerm) return toast.error("Please provide both session and term.");
+      setLoading(true);
+      const { error } = await supabase.from('school_settings').update({ current_session: newGlobalSession, current_term: newGlobalTerm }).eq('id', 1);
+      if (error) {
+          await supabase.from('school_settings').insert([{ id: 1, current_session: newGlobalSession, current_term: newGlobalTerm }]);
+      }
+      toast.success("Global Term & Session Updated!");
+      setGlobalSettings({ session: newGlobalSession, term: newGlobalTerm });
+      setLoading(false);
   };
 
   const fetchStats = async () => {
@@ -79,7 +98,6 @@ const HeadTeacherDashboard = () => {
     if (!data) return;
     const groups: { [key: string]: ResultBatch } = {};
     data.forEach((row) => {
-      // Safety check for null class_level
       if (!row.class_level || row.class_level.includes('SS') || row.class_level.includes('JSS')) return;
       const key = `${row.class_level}-${row.subject}`;
       if (!groups[key]) groups[key] = { id: key, class_level: row.class_level, subject: row.subject, teacher_name: row.teacher_name || 'Class Teacher', student_count: 0, results: [] };
@@ -93,7 +111,6 @@ const HeadTeacherDashboard = () => {
     if (!data) return;
     const groups: { [key: string]: ResultBatch } = {};
     data.forEach((row) => {
-      // Safety check for null class_level
       if (!row.class_level || row.class_level.includes('SS') || row.class_level.includes('JSS')) return;
       const key = `${row.class_level}-${row.subject}`;
       if (!groups[key]) groups[key] = { id: key, class_level: row.class_level, subject: row.subject, teacher_name: row.teacher_name || 'Class Teacher', student_count: 0, results: [] };
@@ -322,17 +339,14 @@ const HeadTeacherDashboard = () => {
     <div className="min-h-[100dvh] bg-orange-200 flex font-sans">
       <SEO title="Head Teacher Portal | Citadel" description="Primary Section Admin" noindex={true} />
       
-      {/* PENDING APPROVAL MODAL */}
       {confirmAction && selectedBatch && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in"><div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 animate-in zoom-in-95"><div className={`w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-4 ${confirmAction === 'approve' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'}`}>{confirmAction === 'approve' ? <CheckCircle size={28} /> : <AlertTriangle size={28} />}</div><h3 className="text-xl font-bold text-center text-gray-900 mb-2">{confirmAction === 'approve' ? 'Approve Results?' : 'Reject Results?'}</h3><p className="text-center text-gray-500 text-sm mb-6">Are you sure you want to <strong>{confirmAction.toUpperCase()}</strong> the {selectedBatch.subject} results for {selectedBatch.class_level}?</p><div className="grid grid-cols-2 gap-3"><button onClick={() => setConfirmAction(null)} className="py-3 px-4 rounded-xl border border-gray-200 font-bold text-gray-600 hover:bg-gray-50">Cancel</button><button onClick={executeBatchAction} disabled={loading} className={`py-3 px-4 rounded-xl font-bold text-white shadow-lg flex items-center justify-center gap-2 ${confirmAction === 'approve' ? 'bg-[#14532d] hover:bg-green-900' : 'bg-red-600 hover:bg-red-700'}`}>{loading ? 'Processing...' : `Yes, ${confirmAction === 'approve' ? 'Approve' : 'Reject'}`}</button></div></div></div>
       )}
 
-      {/* PENDING BATCH DETAILS MODAL */}
       {selectedBatch && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in"><div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95"><div className="bg-[#14532d] p-6 text-white flex justify-between items-center shrink-0"><div><h2 className="text-xl font-bold flex items-center gap-2">{selectedBatch.class_level} - {selectedBatch.subject}</h2><p className="text-green-200 text-sm">{selectedBatch.student_count} Pupils Submitted</p></div><button onClick={() => setSelectedBatch(null)} className="text-green-200 hover:text-white"><XCircle size={28}/></button></div><div className="flex-1 overflow-y-auto p-6 bg-green-50/30"><div className="bg-white border border-green-100 rounded-xl shadow-sm overflow-hidden"><table className="w-full text-left text-sm"><thead className="bg-green-50 text-green-800 font-bold border-b border-green-100"><tr><th className="p-4">Pupil Name</th><th className="p-4 text-center">CA (40)</th><th className="p-4 text-center">Exam (60)</th><th className="p-4 text-center">Total</th><th className="p-4 text-center">Grade</th></tr></thead><tbody className="divide-y divide-green-50">{selectedBatch.results.map((res: any) => (<tr key={res.id} className="hover:bg-green-50/50"><td className="p-4 font-medium text-gray-900">{res.student_name}</td><td className="p-4 text-center text-gray-600">{(res.ca1_score||0) + (res.ca2_score||0)}</td><td className="p-4 text-center text-gray-600">{res.exam_score}</td><td className="p-4 text-center font-bold text-green-900">{res.total_score}</td><td className={`p-4 text-center font-bold ${res.total_score < 40 ? 'text-red-500' : 'text-green-600'}`}>{res.grade}</td></tr>))}</tbody></table></div></div><div className="p-6 bg-white border-t flex justify-end gap-4 shrink-0"><button onClick={() => initiateBatchAction('reject')} disabled={loading} className="px-6 py-3 bg-red-100 text-red-700 font-bold rounded-xl hover:bg-red-200 transition-colors">Reject Batch</button><button onClick={() => initiateBatchAction('approve')} disabled={loading} className="px-6 py-3 bg-[#14532d] text-white font-bold rounded-xl hover:bg-green-900 shadow-lg transition-all flex items-center gap-2"><CheckCircle size={18}/> Approve Batch</button></div></div></div>
       )}
 
-      {/* APPROVED BATCH DETAILS MODAL */}
       {selectedApprovedBatch && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in"><div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95"><div className="bg-green-700 p-6 text-white flex justify-between items-center shrink-0"><div><h2 className="text-xl font-bold flex items-center gap-2">{selectedApprovedBatch.class_level} - {selectedApprovedBatch.subject} <span className="bg-white text-green-700 text-xs px-2 py-0.5 rounded-full font-black">APPROVED</span></h2><p className="text-green-100 text-sm">{selectedApprovedBatch.student_count} Results Managed</p></div><button onClick={() => setSelectedApprovedBatch(null)} className="text-green-100 hover:text-white"><XCircle size={28}/></button></div><div className="flex-1 overflow-y-auto p-6 bg-green-50/30"><div className="bg-white border rounded-xl shadow-sm overflow-hidden"><table className="w-full text-left text-sm"><thead className="bg-green-50 text-green-800 font-bold border-b border-green-100"><tr><th className="p-4">Pupil Name</th><th className="p-4 text-center">CA</th><th className="p-4 text-center">Exam</th><th className="p-4 text-center">Total</th><th className="p-4 text-center">Grade</th><th className="p-4 text-center">Action</th></tr></thead><tbody className="divide-y divide-green-50">{selectedApprovedBatch.results.map((res: any) => (<tr key={res.id} className="hover:bg-green-50/50"><td className="p-4 font-medium text-gray-900">{res.student_name}</td><td className="p-4 text-center text-gray-600">{(res.ca1_score||0) + (res.ca2_score||0)}</td><td className="p-4 text-center text-gray-600">{res.exam_score}</td><td className="p-4 text-center font-bold text-green-700">{res.total_score}</td><td className={`p-4 text-center font-bold ${res.total_score < 40 ? 'text-red-500' : 'text-green-600'}`}>{res.grade}</td><td className="p-4 text-center"><button onClick={() => deleteSingleResult(res.id)} className="text-red-400 hover:text-red-600 hover:bg-red-50 p-2 rounded"><Trash2 size={16} /></button></td></tr>))}</tbody></table></div></div><div className="p-6 bg-red-50 border-t border-red-100 flex justify-between items-center shrink-0"><p className="text-xs text-red-400 max-w-sm">Warning: Deleting the batch removes all results permanently.</p><button onClick={() => deleteBatchResults(selectedApprovedBatch)} disabled={loading} className="px-6 py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 shadow flex items-center gap-2"><Trash2 size={18}/> Delete Entire Batch</button></div></div></div>
       )}
@@ -349,40 +363,6 @@ const HeadTeacherDashboard = () => {
               <h1 className="text-2xl font-bold text-green-900">Dashboard Overview</h1>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6"><div className="bg-white p-6 rounded-2xl shadow-sm border border-green-100"><h3 className="text-gray-500 font-bold text-sm uppercase">Pupils (Primary)</h3><p className="text-4xl font-bold text-[#14532d] mt-2">{stats.students}</p></div><div className="bg-white p-6 rounded-2xl shadow-sm border border-green-100"><h3 className="text-gray-500 font-bold text-sm uppercase">Teachers (Primary)</h3><p className="text-4xl font-bold text-[#14532d] mt-2">{stats.teachers}</p></div><div className="bg-white p-6 rounded-2xl shadow-sm border border-green-100"><h3 className="text-gray-500 font-bold text-sm uppercase">Pending Approvals</h3><p className="text-4xl font-bold text-yellow-600 mt-2">{stats.pendingResults}</p></div></div>
             </div>
-          )}
-
-          {/* THE MISSING APPROVALS TAB IS BACK! */}
-          {activeTab === 'approvals' && (
-             <div className="space-y-6 animate-in fade-in">
-               <div className="flex justify-between items-center">
-                  <h1 className="text-2xl font-bold text-green-900">Result Approvals</h1>
-                  <span className="bg-green-100 text-green-800 px-3 py-1 rounded-full text-xs font-bold">{pendingBatches.length} Batches Pending</span>
-               </div>
-               
-               {pendingBatches.length > 0 ? (
-                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                   {pendingBatches.map(batch => (
-                     <div key={batch.id} onClick={() => setSelectedBatch(batch)} className="bg-white border border-green-100 p-6 rounded-2xl shadow-sm hover:shadow-md hover:border-green-300 transition-all cursor-pointer group">
-                       <div className="flex justify-between items-start mb-4">
-                         <div className="w-12 h-12 rounded-xl bg-green-50 flex items-center justify-center text-green-600 group-hover:bg-[#14532d] group-hover:text-white transition-colors"><BookOpen size={24} /></div>
-                         <span className="text-xs font-bold bg-yellow-100 text-yellow-700 px-2 py-1 rounded">Pending</span>
-                       </div>
-                       <h3 className="text-lg font-bold text-gray-800">{batch.subject}</h3>
-                       <p className="text-sm font-medium text-gray-500 mb-4">{batch.class_level}</p>
-                       <div className="flex items-center gap-3 text-xs text-gray-400 border-t pt-4">
-                         <User size={14} /> <span className="truncate">{batch.teacher_name}</span>
-                         <span className="ml-auto font-bold text-gray-600">{batch.student_count} Pupils</span>
-                       </div>
-                     </div>
-                   ))}
-                 </div>
-               ) : (
-                 <div className="bg-white p-12 text-center rounded-2xl border border-dashed border-green-200 text-gray-400">
-                   <CheckCircle size={48} className="mx-auto mb-3 opacity-20 text-green-500"/>
-                   <p>No pending results.</p>
-                 </div>
-               )}
-             </div>
           )}
 
           {activeTab === 'manage-results' && (
@@ -560,6 +540,75 @@ const HeadTeacherDashboard = () => {
             </div>
           )}
 
+          {activeTab === 'approvals' && (
+             <div className="space-y-6 animate-in fade-in">
+               <div className="flex justify-between items-center">
+                  <h1 className="text-2xl font-bold text-green-900">Result Approvals</h1>
+                  <span className="bg-green-100 text-green-800 px-3 py-1 rounded-full text-xs font-bold">{pendingBatches.length} Batches Pending</span>
+               </div>
+               
+               {pendingBatches.length > 0 ? (
+                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                   {pendingBatches.map(batch => (
+                     <div key={batch.id} onClick={() => setSelectedBatch(batch)} className="bg-white border border-green-100 p-6 rounded-2xl shadow-sm hover:shadow-md hover:border-green-300 transition-all cursor-pointer group">
+                       <div className="flex justify-between items-start mb-4">
+                         <div className="w-12 h-12 rounded-xl bg-green-50 flex items-center justify-center text-green-600 group-hover:bg-[#14532d] group-hover:text-white transition-colors"><BookOpen size={24} /></div>
+                         <span className="text-xs font-bold bg-yellow-100 text-yellow-700 px-2 py-1 rounded">Pending</span>
+                       </div>
+                       <h3 className="text-lg font-bold text-gray-800">{batch.subject}</h3>
+                       <p className="text-sm font-medium text-gray-500 mb-4">{batch.class_level}</p>
+                       <div className="flex items-center gap-3 text-xs text-gray-400 border-t pt-4">
+                         <User size={14} /> <span className="truncate">{batch.teacher_name}</span>
+                         <span className="ml-auto font-bold text-gray-600">{batch.student_count} Pupils</span>
+                       </div>
+                     </div>
+                   ))}
+                 </div>
+               ) : (
+                 <div className="bg-white p-12 text-center rounded-2xl border border-dashed border-green-200 text-gray-400">
+                   <CheckCircle size={48} className="mx-auto mb-3 opacity-20 text-green-500"/>
+                   <p>No pending results.</p>
+                 </div>
+               )}
+             </div>
+          )}
+
+          {activeTab === 'manage-results' && (
+             <div className="space-y-6 animate-in fade-in">
+               <div className="flex justify-between items-center">
+                  <div>
+                    <h1 className="text-2xl font-bold text-gray-800">Manage Approved Results</h1>
+                    <p className="text-gray-500 text-sm mt-1">View or delete results that have already been approved.</p>
+                  </div>
+                  <span className="bg-green-100 text-green-800 px-3 py-1 rounded-full text-xs font-bold">{approvedBatches.length} Batches</span>
+               </div>
+               
+               {approvedBatches.length > 0 ? (
+                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                   {approvedBatches.map(batch => (
+                     <div key={batch.id} onClick={() => setSelectedApprovedBatch(batch)} className="bg-white border border-gray-200 p-6 rounded-2xl shadow-sm hover:shadow-md hover:border-green-300 transition-all cursor-pointer group">
+                       <div className="flex justify-between items-start mb-4">
+                         <div className="w-12 h-12 rounded-xl bg-green-50 flex items-center justify-center text-green-600 group-hover:bg-green-600 group-hover:text-white transition-colors"><FileCheck size={24} /></div>
+                         <span className="text-xs font-bold bg-green-100 text-green-700 px-2 py-1 rounded">Approved</span>
+                       </div>
+                       <h3 className="text-lg font-bold text-gray-800">{batch.subject}</h3>
+                       <p className="text-sm font-medium text-gray-500 mb-4">{batch.class_level}</p>
+                       <div className="flex items-center gap-3 text-xs text-gray-400 border-t pt-4">
+                         <User size={14} /> <span className="truncate">{batch.teacher_name}</span>
+                         <span className="ml-auto font-bold text-gray-600">{batch.student_count} Pupils</span>
+                       </div>
+                     </div>
+                   ))}
+                 </div>
+               ) : (
+                 <div className="bg-white p-12 text-center rounded-2xl border border-dashed border-gray-300 text-gray-400">
+                   <Archive size={48} className="mx-auto mb-3 opacity-20 text-gray-400"/>
+                   <p>No approved results to manage.</p>
+                 </div>
+               )}
+             </div>
+          )}
+
           {activeTab === 'updates' && (
             <div className="space-y-6 animate-in fade-in">
                 <h1 className="text-2xl font-bold text-green-900">Manage News & Updates</h1>
@@ -633,7 +682,39 @@ const HeadTeacherDashboard = () => {
           {activeTab === 'settings' && (
             <div className="space-y-6 animate-in fade-in">
                 <h1 className="text-2xl font-bold text-gray-800">School Configuration</h1>
-                <div className="bg-white p-8 rounded-2xl shadow-sm border border-green-100 max-w-2xl"><div className="flex items-center gap-3 mb-6"><div className="w-10 h-10 rounded-full bg-[#14532d] flex items-center justify-center text-white"><Calendar size={20}/></div><div><h3 className="font-bold text-gray-800">Resumption Date</h3><p className="text-xs text-gray-500">Set the next term begin date for ALL students.</p></div></div><div className="space-y-4"><div><label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Current Setting</label><div className="text-lg font-bold text-green-900">{resumptionDate || 'Not Set'}</div></div><div className="pt-4 border-t border-gray-100"><label className="text-xs font-bold text-gray-500 uppercase mb-2 block">Update Date</label><div className="flex gap-4"><input type="text" placeholder="e.g. January 12th, 2026" className="flex-1 p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 outline-none" value={newResumptionDate} onChange={(e) => setNewResumptionDate(e.target.value)} /><button onClick={updateResumptionDate} disabled={loading} className="bg-[#14532d] text-white px-6 py-3 rounded-xl font-bold hover:bg-green-900 transition-all disabled:opacity-50">{loading ? 'Saving...' : 'Save'}</button></div></div></div></div>
+                <div className="bg-white p-8 rounded-2xl shadow-sm border border-green-100 max-w-2xl">
+                   
+                   {/* Term & Session Setting */}
+                   <div className="mb-10 pb-10 border-b border-gray-100">
+                     <div className="flex items-center gap-3 mb-6">
+                        <div className="w-10 h-10 rounded-full bg-green-50 flex items-center justify-center text-green-700"><FileText size={20}/></div>
+                        <div><h3 className="font-bold text-gray-800">Current Academic Term</h3><p className="text-xs text-gray-500">This dictates where new results are uploaded to.</p></div>
+                     </div>
+                     <div className="grid grid-cols-2 gap-4 mb-4">
+                        <div><label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Active Session</label><div className="text-lg font-bold text-[#14532d]">{globalSettings.session || 'Not Set'}</div></div>
+                        <div><label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Active Term</label><div className="text-lg font-bold text-[#14532d]">{globalSettings.term || 'Not Set'}</div></div>
+                     </div>
+                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-gray-50 p-4 rounded-xl border border-gray-200">
+                        <div>
+                            <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Update Session</label>
+                            <input type="text" value={newGlobalSession} onChange={(e) => setNewGlobalSession(e.target.value)} placeholder="e.g. 2025/2026" className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-[#14532d] outline-none" />
+                        </div>
+                        <div>
+                            <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Update Term</label>
+                            <select value={newGlobalTerm} onChange={(e) => setNewGlobalTerm(e.target.value)} className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-[#14532d] outline-none">
+                               <option>1st Term</option><option>2nd Term</option><option>3rd Term</option>
+                            </select>
+                        </div>
+                        <button onClick={updateGlobalSettings} disabled={loading} className="md:col-span-2 bg-[#14532d] text-white px-6 py-3 rounded-xl font-bold hover:bg-green-900 transition-all disabled:opacity-50">
+                           {loading ? 'Saving...' : 'Update Term & Session'}
+                        </button>
+                     </div>
+                   </div>
+
+                   {/* Resumption Date Setting */}
+                   <div className="flex items-center gap-3 mb-6"><div className="w-10 h-10 rounded-full bg-[#14532d] flex items-center justify-center text-white"><Calendar size={20}/></div><div><h3 className="font-bold text-gray-800">Resumption Date</h3><p className="text-xs text-gray-500">Set the next term begin date for ALL students.</p></div></div>
+                   <div className="space-y-4"><div><label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Current Setting</label><div className="text-lg font-bold text-green-900">{resumptionDate || 'Not Set'}</div></div><div className="pt-4 border-t border-gray-100"><label className="text-xs font-bold text-gray-500 uppercase mb-2 block">Update Date</label><div className="flex gap-4"><input type="text" placeholder="e.g. January 12th, 2026" className="flex-1 p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 outline-none" value={newResumptionDate} onChange={(e) => setNewResumptionDate(e.target.value)} /><button onClick={updateResumptionDate} disabled={loading} className="bg-[#14532d] text-white px-6 py-3 rounded-xl font-bold hover:bg-green-900 transition-all disabled:opacity-50">{loading ? 'Saving...' : 'Save'}</button></div></div></div>
+                </div>
             </div>
           )}
 

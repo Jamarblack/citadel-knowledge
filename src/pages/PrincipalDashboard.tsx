@@ -25,10 +25,13 @@ const PrincipalDashboard = () => {
   const [teacherList, setTeacherList] = useState<any[]>([]);
   const [pendingBatches, setPendingBatches] = useState<ResultBatch[]>([]);
   const [approvedBatches, setApprovedBatches] = useState<ResultBatch[]>([]);
-  const [globalSettings, setGlobalSettings] = useState({ session: '', term: '' });
+  const [globalSettings, setGlobalSettings] = useState({ session: '2025/2026', term: '1st Term' });
   
   const [resumptionDate, setResumptionDate] = useState("");
   const [newResumptionDate, setNewResumptionDate] = useState("");
+  const [newGlobalSession, setNewGlobalSession] = useState("");
+  const [newGlobalTerm, setNewGlobalTerm] = useState("");
+
   const [updates, setUpdates] = useState<any[]>([]);
   const [newUpdate, setNewUpdate] = useState({ title: "", category: "Event", event_date: "" });
   
@@ -66,7 +69,24 @@ const PrincipalDashboard = () => {
 
   const fetchSettings = async () => {
     const { data } = await supabase.from('school_settings').select('*').single();
-    if (data) setGlobalSettings({ session: data.current_session, term: data.current_term });
+    if (data) {
+        setGlobalSettings({ session: data.current_session, term: data.current_term });
+        setNewGlobalSession(data.current_session);
+        setNewGlobalTerm(data.current_term);
+    }
+  };
+
+  const updateGlobalSettings = async () => {
+      if (!newGlobalSession || !newGlobalTerm) return toast.error("Please provide both session and term.");
+      setLoading(true);
+      const { error } = await supabase.from('school_settings').update({ current_session: newGlobalSession, current_term: newGlobalTerm }).eq('id', 1);
+      if (error) {
+          // If update fails because id=1 doesn't exist, insert it
+          await supabase.from('school_settings').insert([{ id: 1, current_session: newGlobalSession, current_term: newGlobalTerm }]);
+      }
+      toast.success("Global Term & Session Updated!");
+      setGlobalSettings({ session: newGlobalSession, term: newGlobalTerm });
+      setLoading(false);
   };
 
   const fetchUpdates = async () => {
@@ -381,7 +401,6 @@ const PrincipalDashboard = () => {
             </div>
           )}
 
-          {/* THE MISSING APPROVALS TAB IS BACK! */}
           {activeTab === 'approvals' && (
              <div className="space-y-6 animate-in fade-in">
                <div className="flex justify-between items-center">
@@ -594,14 +613,6 @@ const PrincipalDashboard = () => {
             </div>
           )}
 
-          {activeTab === 'updates' && (
-            <div className="space-y-6 animate-in fade-in">
-                <h1 className="text-2xl font-bold text-gray-800">Manage News & Updates</h1>
-                <div className="bg-white p-6 rounded-2xl shadow-sm border border-blue-100 flex flex-col md:flex-row gap-4 items-end"><div className="w-full"><label className="text-xs font-bold text-gray-400 uppercase">Title</label><input type="text" className="w-full p-3 bg-gray-50 border rounded-xl" placeholder="e.g. Inter-House Sports" value={newUpdate.title} onChange={e => setNewUpdate({...newUpdate, title: e.target.value})} /></div><div className="w-full md:w-48"><label className="text-xs font-bold text-gray-400 uppercase">Category</label><select className="w-full p-3 bg-gray-50 border rounded-xl" value={newUpdate.category} onChange={e => setNewUpdate({...newUpdate, category: e.target.value})}><option>Event</option><option>Holiday</option><option>Admission</option><option>News</option></select></div><div className="w-full md:w-48"><label className="text-xs font-bold text-gray-400 uppercase">Date</label><input type="date" className="w-full p-3 bg-gray-50 border rounded-xl" value={newUpdate.event_date} onChange={e => setNewUpdate({...newUpdate, event_date: e.target.value})} /></div><button onClick={postUpdate} disabled={loading} className="px-6 py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 flex items-center gap-2">{loading ? 'Posting...' : <><Plus size={18}/> Post</>}</button></div>
-                <div className="bg-white rounded-2xl shadow-sm border border-blue-100 overflow-hidden"><table className="w-full text-left text-sm"><thead className="bg-blue-50 text-blue-900 border-b border-blue-100"><tr><th className="p-4">Title</th><th className="p-4">Category</th><th className="p-4">Date</th><th className="p-4 text-right">Action</th></tr></thead><tbody className="divide-y divide-blue-50">{updates.map(update => (<tr key={update.id} className="hover:bg-blue-50/50"><td className="p-4 font-bold">{update.title}</td><td className="p-4"><span className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs font-bold">{update.category}</span></td><td className="p-4 text-gray-500">{new Date(update.event_date).toDateString()}</td><td className="p-4 text-right"><button onClick={() => deleteUpdate(update.id)} className="text-red-500 hover:bg-red-50 p-2 rounded-lg transition-colors"><Trash2 size={18}/></button></td></tr>))}{updates.length === 0 && <tr><td colSpan={4} className="p-8 text-center text-gray-400">No updates posted yet.</td></tr>}</tbody></table></div>
-            </div>
-          )}
-
           {activeTab === 'students' && (
             <div className="space-y-6 animate-in fade-in">
                <h1 className="text-2xl font-bold text-gray-800">Secondary Students Database</h1>
@@ -650,7 +661,39 @@ const PrincipalDashboard = () => {
           {activeTab === 'settings' && (
             <div className="space-y-6 animate-in fade-in">
                 <h1 className="text-2xl font-bold text-gray-800">School Configuration</h1>
-                <div className="bg-white p-8 rounded-2xl shadow-sm border border-blue-100 max-w-2xl"><div className="flex items-center gap-3 mb-6"><div className="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center text-blue-600"><Calendar size={20}/></div><div><h3 className="font-bold text-gray-800">Resumption Date</h3><p className="text-xs text-gray-500">Set the next term begin date for ALL students.</p></div></div><div className="space-y-4"><div><label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Current Setting</label><div className="text-lg font-bold text-blue-900">{resumptionDate || 'Not Set'}</div></div><div className="pt-4 border-t border-gray-100"><label className="text-xs font-bold text-gray-500 uppercase mb-2 block">Update Date</label><div className="flex gap-4"><input type="text" placeholder="e.g. January 12th, 2026" className="flex-1 p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none" value={newResumptionDate} onChange={(e) => setNewResumptionDate(e.target.value)} /><button onClick={updateResumptionDate} disabled={loading} className="bg-blue-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-blue-700 transition-all disabled:opacity-50">{loading ? 'Saving...' : 'Save'}</button></div></div></div></div>
+                <div className="bg-white p-8 rounded-2xl shadow-sm border border-blue-100 max-w-2xl">
+                   
+                   {/* Term & Session Setting */}
+                   <div className="mb-10 pb-10 border-b border-gray-100">
+                     <div className="flex items-center gap-3 mb-6">
+                        <div className="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center text-blue-600"><FileText size={20}/></div>
+                        <div><h3 className="font-bold text-gray-800">Current Academic Term</h3><p className="text-xs text-gray-500">This dictates where new results are uploaded to.</p></div>
+                     </div>
+                     <div className="grid grid-cols-2 gap-4 mb-4">
+                        <div><label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Active Session</label><div className="text-lg font-bold text-blue-900">{globalSettings.session || 'Not Set'}</div></div>
+                        <div><label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Active Term</label><div className="text-lg font-bold text-blue-900">{globalSettings.term || 'Not Set'}</div></div>
+                     </div>
+                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-gray-50 p-4 rounded-xl border border-gray-200">
+                        <div>
+                            <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Update Session</label>
+                            <input type="text" value={newGlobalSession} onChange={(e) => setNewGlobalSession(e.target.value)} placeholder="e.g. 2025/2026" className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none" />
+                        </div>
+                        <div>
+                            <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Update Term</label>
+                            <select value={newGlobalTerm} onChange={(e) => setNewGlobalTerm(e.target.value)} className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none">
+                               <option>1st Term</option><option>2nd Term</option><option>3rd Term</option>
+                            </select>
+                        </div>
+                        <button onClick={updateGlobalSettings} disabled={loading} className="md:col-span-2 bg-blue-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-blue-700 transition-all disabled:opacity-50">
+                           {loading ? 'Saving...' : 'Update Term & Session'}
+                        </button>
+                     </div>
+                   </div>
+
+                   {/* Resumption Date Setting */}
+                   <div className="flex items-center gap-3 mb-6"><div className="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center text-blue-600"><Calendar size={20}/></div><div><h3 className="font-bold text-gray-800">Resumption Date</h3><p className="text-xs text-gray-500">Appears on Student Report Cards.</p></div></div>
+                   <div className="space-y-4"><div><label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Current Setting</label><div className="text-lg font-bold text-blue-900">{resumptionDate || 'Not Set'}</div></div><div className="pt-4 border-t border-gray-100"><label className="text-xs font-bold text-gray-500 uppercase mb-2 block">Update Date</label><div className="flex gap-4"><input type="text" placeholder="e.g. January 12th, 2026" className="flex-1 p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none" value={newResumptionDate} onChange={(e) => setNewResumptionDate(e.target.value)} /><button onClick={updateResumptionDate} disabled={loading} className="bg-blue-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-blue-700 transition-all disabled:opacity-50">{loading ? 'Saving...' : 'Save'}</button></div></div></div>
+                </div>
             </div>
           )}
 

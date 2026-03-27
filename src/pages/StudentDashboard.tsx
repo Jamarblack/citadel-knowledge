@@ -1,453 +1,375 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { 
-  LogOut, User, FileText, Download, Menu, 
-  CheckCircle, Lock, GraduationCap, School, Camera
-} from "lucide-react";
+import { LogOut, User, FileText, CheckCircle, Menu, Printer } from "lucide-react";
 import { supabase } from "@/lib/supabase";
-import { toast } from "sonner";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import SEO from "@/components/SEO";
-import jsPDF from "jspdf";
-import autoTable from "jspdf-autotable";
 import logo from "/school-logo.png";
 
-// REPLACE WITH YOUR ACTUAL LOGO URL
-const SCHOOL_LOGO_URL = "https://www.citadelofknowledgeinternationalschool-college.com/school-logo.png"; 
+const PSYCHOMOTOR_KEYS = ["Handwriting", "Sports", "Fluency", "Drawing", "Handling Tools"];
+const AFFECTIVE_KEYS = ["Punctuality", "Neatness", "Politeness", "Honesty", "Leadership", "Attentiveness"];
 
 const StudentDashboard = () => {
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState("overview");
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState("result");
   const [studentProfile, setStudentProfile] = useState<any>(null);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [uploading, setUploading] = useState(false);
   
-  // NEW: Dynamic Resumption Date
-  const [resumptionDate, setResumptionDate] = useState("Loading...");
-
-  // Result Checker States
-  const [selectedSession, setSelectedSession] = useState("2025/2026");
-  const [selectedTerm, setSelectedTerm] = useState("1st Term");
-  const [resultData, setResultData] = useState<any[]>([]);
-  const [reportDetails, setReportDetails] = useState<any>(null); // Holds Skills/Attendance
-  const [accessGranted, setAccessGranted] = useState(false);
-  const [hasChecked, setHasChecked] = useState(false);
-  
-  // Computed Result Stats
-  const [average, setAverage] = useState(0);
-  const [totalScore, setTotalScore] = useState(0);
-  const [gradeBreakdown, setGradeBreakdown] = useState({ A: 0, B: 0, C: 0, D: 0, E: 0, F: 0 });
+  const [selectedTerm, setSelectedTerm] = useState(""); 
+  const [selectedSession, setSelectedSession] = useState("");
+  const [results, setResults] = useState<any[]>([]);
+  const [reportDetails, setReportDetails] = useState<any>(null);
+  const [nextTermBegins, setNextTermBegins] = useState("");
 
   useEffect(() => {
     const id = localStorage.getItem('studentId');
     if (!id) navigate('/');
-    fetchProfile(id!);
+    fetchInitialData(id!);
   }, []);
 
-  const fetchProfile = async (id: string) => {
-    // 1. Get Student Data
-    const { data: student } = await supabase.from('students').select('*').eq('id', id).single();
-    
-    if (student) {
-      setStudentProfile(student);
+  const fetchInitialData = async (id: string) => {
+    const { data: settings } = await supabase.from('school_settings').select('*').single();
+    let currentSession = "2025/2026";
+    let currentTerm = "2nd Term";
 
-      // 2. Determine Section (Primary or Secondary)
-      const isSecondary = student.current_class.includes('JSS') || student.current_class.includes('SS');
-      const sectionType = isSecondary ? 'Secondary' : 'Primary';
+    if (settings) {
+        currentSession = settings.current_session;
+        currentTerm = settings.current_term;
+        setSelectedSession(currentSession);
+        setSelectedTerm(currentTerm);
+    }
 
-      // 3. Fetch the specific resumption date for their section
-      const { data: config } = await supabase.from('school_config')
-        .select('next_term_begins')
-        .eq('section_type', sectionType)
-        .maybeSingle();
+    const { data: config } = await supabase.from('school_config').select('*').limit(1).maybeSingle();
+    if (config) setNextTermBegins(config.next_term_begins);
 
-      if (config) {
-        setResumptionDate(config.next_term_begins);
-      } else {
-        setResumptionDate("TBA");
-      }
+    const { data: profile } = await supabase.from('students').select('*').eq('id', id).single();
+    if (profile) {
+      setStudentProfile(profile);
+      fetchResults(profile.id, currentTerm, currentSession); 
     }
   };
 
-  // --- PROFILE UPLOAD ---
-  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    if (!event.target.files?.length || !studentProfile) return;
-    setUploading(true);
-    try {
-        const file = event.target.files[0];
-        const fileExt = file.name.split('.').pop();
-        const filePath = `student_${studentProfile.id}_${Math.random()}.${fileExt}`;
-        
-        const { error: uploadError } = await supabase.storage.from('passports').upload(filePath, file);
-        if (uploadError) throw uploadError;
-        
-        const { data: { publicUrl } } = supabase.storage.from('passports').getPublicUrl(filePath);
-        
-        const { error: updateError } = await supabase.from('students').update({ passport_url: publicUrl }).eq('id', studentProfile.id);
-        if (updateError) throw updateError;
-        
-        setStudentProfile({ ...studentProfile, passport_url: publicUrl });
-        toast.success("Profile Photo Updated");
-    } catch (e: any) {
-        toast.error("Upload failed: " + e.message);
-    } finally {
-        setUploading(false);
-    }
-  };
-
-  const handleCheckResult = async () => {
+  const fetchResults = async (studentId: string, term: string, session: string) => {
     setLoading(true);
-    setHasChecked(true);
-    setAccessGranted(false);
-
-    try {
-      // 1. CHECK PAYMENT
-      const { data: payment } = await supabase.from('payments')
-        .select('*')
-        .eq('student_id', studentProfile.id)
-        .eq('purpose', 'PIN Purchase')
-        .eq('session', selectedSession)
-        .eq('term', selectedTerm)
-        .maybeSingle();
-
-      if (!payment) {
-        setLoading(false);
-        return;
-      }
-
-      setAccessGranted(true);
-
-      // 2. FETCH ACADEMIC RESULTS
-      const { data: results } = await supabase.from('results')
-        .select('*')
-        .eq('student_id', studentProfile.id)
-        .eq('session', selectedSession)
-        .eq('term', selectedTerm)
-        .eq('status', 'approved');
-
-      if (results) {
-        setResultData(results);
-        calculateStats(results);
-      }
-
-      // 3. FETCH REPORT DETAILS (Skills, Attendance, Remarks)
-      const { data: details } = await supabase.from('term_reports')
-        .select('*')
-        .eq('student_id', studentProfile.id)
-        .eq('session', selectedSession)
-        .eq('term', selectedTerm)
-        .maybeSingle();
+    
+    const { data: resData } = await supabase.from('results')
+      .select('*')
+      .eq('student_id', studentId)
+      .eq('term', term)
+      .eq('session', session)
+      .eq('status', 'approved');
       
-      setReportDetails(details);
+    // STRICT FILTER: Remove any "ghost" uploads where CA1, CA2, and Exam are ALL zero.
+    const validResults = (resData || []).filter(r => !(r.ca1_score === 0 && r.ca2_score === 0 && r.exam_score === 0));
+    setResults(validResults);
 
-    } catch (e: any) {
-      toast.error("Error checking result");
-    } finally {
-      setLoading(false);
-    }
+    const { data: repData } = await supabase.from('term_reports')
+      .select('*')
+      .eq('student_id', studentId)
+      .eq('term', term)
+      .eq('session', session)
+      .maybeSingle();
+    setReportDetails(repData);
+
+    setLoading(false);
   };
 
-  const calculateStats = (results: any[]) => {
-    let total = 0;
-    let counts = { A: 0, B: 0, C: 0, D: 0, E: 0, F: 0 };
-    results.forEach(r => {
-      total += Number(r.total_score) || 0;
-      const g = r.grade as keyof typeof counts;
-      if (counts[g] !== undefined) counts[g]++;
-    });
-    setTotalScore(total);
-    setAverage(results.length > 0 ? Math.round(total / results.length) : 0);
-    setGradeBreakdown(counts);
+  const handleCheckResult = () => {
+    if (studentProfile) fetchResults(studentProfile.id, selectedTerm, selectedSession);
   };
 
-  const getBase64ImageFromURL = (url: string): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const img = new Image();
-      img.setAttribute("crossOrigin", "anonymous");
-      img.onload = () => {
-        const canvas = document.createElement("canvas");
-        canvas.width = img.width;
-        canvas.height = img.height;
-        const ctx = canvas.getContext("2d");
-        ctx?.drawImage(img, 0, 0);
-        const dataURL = canvas.toDataURL("image/png");
-        resolve(dataURL);
-      };
-      img.onerror = () => resolve(""); 
-      img.src = url;
-    });
-  };
-
-  // --- PDF GENERATOR ---
-  const downloadResult = async () => {
-    if (!studentProfile) return;
-    
-    const doc = new jsPDF();
-    const pageWidth = doc.internal.pageSize.width;
-    const pageHeight = doc.internal.pageSize.height;
-    const logoBase64 = await getBase64ImageFromURL(SCHOOL_LOGO_URL);
-
-    // -- WATERMARK --
-    if (logoBase64) {
-        doc.saveGraphicsState();
-        doc.setGState(new doc.GState({ opacity: 0.1 }));
-        const wmSize = 100;
-        doc.addImage(logoBase64, 'PNG', (pageWidth - wmSize)/2, (pageHeight - wmSize)/2, wmSize, wmSize);
-        doc.restoreGraphicsState();
-        doc.addImage(logoBase64, 'PNG', 10, 10, 25, 25); // Header Logo
-    }
-
-    // -- HEADER --
-    doc.setTextColor(153, 0, 0); 
-    doc.setFontSize(22); doc.setFont("helvetica", "bold");
-    doc.text("CITADEL OF KNOWLEDGE", pageWidth / 2 + 10, 20, { align: "center" });
-    doc.setFontSize(14); doc.setFont("helvetica", "normal");
-    doc.text("INTERNATIONAL SCHOOL", pageWidth / 2 + 10, 27, { align: "center" });
-    doc.setFontSize(9); doc.setTextColor(80, 80, 80);
-    doc.text("Adjacent First Bank, Saw-Mill Area, Lagos Road, Ilorin, Kwara State.", pageWidth / 2 + 10, 33, { align: "center" });
-
-    // Title
-    doc.setFillColor(153, 0, 0); 
-    doc.rect(0, 42, pageWidth, 8, 'F');
-    doc.setTextColor(255, 255, 255); doc.setFontSize(12); doc.setFont("helvetica", "bold");
-    doc.text(`TERMLY REPORT SHEET - ${selectedTerm.toUpperCase()} ${selectedSession}`, pageWidth / 2, 47, { align: "center" });
-
-    // -- STUDENT INFO --
-    doc.setFillColor(255, 250, 240); 
-    doc.rect(14, 55, 182, 30, 'F'); 
-    doc.setDrawColor(220, 220, 220); doc.rect(14, 55, 182, 30);
-    
-    doc.setTextColor(0, 0, 0); doc.setFontSize(10);
-    const col1X = 18, col2X = 110;
-    let rowY = 62;
-    const drawRow = (l1: string, v1: string, l2: string, v2: string) => {
-        doc.setFont("helvetica", "bold"); doc.text(l1, col1X, rowY);
-        doc.setFont("helvetica", "normal"); doc.text(v1, col1X + 35, rowY);
-        doc.setFont("helvetica", "bold"); doc.text(l2, col2X, rowY);
-        doc.setFont("helvetica", "normal"); doc.text(v2, col2X + 35, rowY);
-        rowY += 6;
-    };
-    drawRow("Student Name:", studentProfile.full_name, "Class:", studentProfile.current_class);
-    drawRow("Admission No:", studentProfile.admission_number, "Session:", selectedSession);
-    drawRow("Total Score:", `${totalScore}`, "Next Term:", resumptionDate); // UPDATED: Use dynamic date
-    drawRow("Average:", `${average}%`, "Position:", "___");
-
-    // -- ACADEMIC TABLE --
-    const isPrimary = !studentProfile.current_class.toUpperCase().includes("JSS") && !studentProfile.current_class.toUpperCase().includes("SS");
-    const tableHead = isPrimary ? [['SUBJECT', 'CLASS\nACTIVITY', 'HOME\nQUIZ', 'EXAM', 'TOTAL', 'GRADE', 'REMARK']] : [['SUBJECT', '1st CA', '2nd CA', 'EXAM', 'TOTAL', 'GRADE', 'REMARK']];
-    
-    autoTable(doc, {
-      startY: 90,
-      head: tableHead,
-      body: resultData.map(r => [r.subject, r.ca1_score||'-', r.ca2_score||'-', r.exam_score, r.total_score, r.grade, r.remarks||'']),
-      theme: 'grid',
-      headStyles: { fillColor: [153, 0, 0], textColor: [255, 255, 255], fontStyle: 'bold', halign: 'center' },
-      bodyStyles: { textColor: [0, 0, 0], lineWidth: 0.1, lineColor: [200, 200, 200] },
-      columnStyles: { 0: { cellWidth: 50, fontStyle: 'bold' }, 6: { fontSize: 8 } },
-      alternateRowStyles: { fillColor: [255, 250, 240] }
-    });
-
-    // -- BOTTOM SECTION: SKILLS & ATTENDANCE --
-    let finalY = (doc as any).lastAutoTable.finalY + 10;
-    
-    // Check if we have room, else add page
-    if (finalY > 220) { doc.addPage(); finalY = 20; }
-
-    // 1. Attendance Box
-    doc.setDrawColor(0, 0, 0); doc.setFillColor(255, 255, 255);
-    doc.rect(14, finalY, 50, 25);
-    doc.setFontSize(9); doc.setFont("helvetica", "bold"); doc.setTextColor(153,0,0);
-    doc.text("ATTENDANCE", 16, finalY + 5);
-    doc.setFont("helvetica", "normal"); doc.setTextColor(0,0,0);
-    doc.text(`School Opened: ${reportDetails?.days_school_open || '-'}`, 16, finalY + 12);
-    doc.text(`Days Present: ${reportDetails?.days_present || '-'}`, 16, finalY + 17);
-    doc.text(`Days Absent: ${reportDetails?.days_absent || '-'}`, 16, finalY + 22);
-
-    // 2. Skills Grid (Psychomotor)
-    if (reportDetails?.psychomotor_skills) {
-        const skills = reportDetails.psychomotor_skills;
-        const skillKeys = Object.keys(skills);
-        if (skillKeys.length > 0) {
-            autoTable(doc, {
-                startY: finalY,
-                margin: { left: 70 },
-                head: [['PSYCHOMOTOR SKILLS', 'RATING']],
-                body: skillKeys.map(k => [k, skills[k]]),
-                theme: 'grid',
-                tableWidth: 60,
-                headStyles: { fillColor: [50, 50, 50], fontSize: 8 },
-                bodyStyles: { fontSize: 8, cellPadding: 1 }
-            });
-        }
-    }
-
-    // 3. Affective Grid
-    if (reportDetails?.affective_skills) {
-        const skills = reportDetails.affective_skills;
-        const skillKeys = Object.keys(skills);
-        if (skillKeys.length > 0) {
-            autoTable(doc, {
-                startY: finalY,
-                margin: { left: 135 },
-                head: [['AFFECTIVE DOMAIN', 'RATING']],
-                body: skillKeys.map(k => [k, skills[k]]),
-                theme: 'grid',
-                tableWidth: 60,
-                headStyles: { fillColor: [50, 50, 50], fontSize: 8 },
-                bodyStyles: { fontSize: 8, cellPadding: 1 }
-            });
-        }
-    }
-
-    // -- REMARKS --
-    finalY = (doc as any).lastAutoTable.finalY + 15;
-    if (finalY > 260) { doc.addPage(); finalY = 20; }
-
-    doc.setFontSize(10); doc.setFont("helvetica", "bold");
-    doc.text("CLASS TEACHER'S REMARK:", 14, finalY);
-    doc.setFont("helvetica", "normal");
-    doc.text(reportDetails?.class_teacher_remark || "No remark entered.", 70, finalY);
-    doc.line(70, finalY+1, 190, finalY+1);
-
-    finalY += 10;
-    doc.setFont("helvetica", "bold");
-    doc.text("PRINCIPAL'S REMARK:", 14, finalY);
-    doc.setFont("helvetica", "normal");
-    doc.text("A good result. Keep it up!", 70, finalY);
-    doc.line(70, finalY+1, 190, finalY+1);
-
-    // Dynamic School Resumes line in PDF footer
-    finalY += 10;
-    doc.setFontSize(9);
-    doc.text(`School Resumes: ${resumptionDate}`, 14, finalY);
-
-    doc.save(`${studentProfile.full_name}_Result.pdf`);
-  };
+  // Calculate Overall Averages based on VALID results
+  const totalScore = results.reduce((acc, curr) => acc + curr.total_score, 0);
+  const averageScore = results.length > 0 ? Math.round(totalScore / results.length) : 0;
 
   const SidebarContent = () => (
-    <div className="h-full flex flex-col bg-white text-white">
-      <div className="p-8 text-center bg-yellow-300 border-b border-red-800">
-         <div className="w-24 h-24 mx-auto rounded-full bg-white border-4 border-yellow-400 relative group overflow-hidden">
-             {studentProfile?.passport_url ? <img src={studentProfile.passport_url} className="w-full h-full object-cover"/> : <span className="flex items-center justify-center h-full text-3xl font-bold text-yellow-300">{studentProfile?.full_name?.[0]}</span>}
-             <label className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer">
-                 <Camera className="text-white" size={24} />
-                 <input type="file" className="hidden" accept="image/*" onChange={handleFileUpload} disabled={uploading} />
-             </label>
+    <div className="h-full flex flex-col bg-[#FFD700] border-r-4 border-black">
+      <div className="p-8 text-center bg-[#FFD700]">
+         <div className="w-28 h-28 mx-auto rounded-full bg-white border-4 border-red-600 shadow-xl overflow-hidden flex items-center justify-center">
+             {studentProfile?.passport_url ? <img src={studentProfile.passport_url} className="w-full h-full object-cover"/> : <span className="text-5xl font-black text-red-600">{studentProfile?.full_name?.[0]}</span>}
          </div>
-         <h3 className="font-bold text-lg mt-3 truncate">{studentProfile?.full_name || 'Student'}</h3>
-         <span className="text-[10px] bg-white text-yellow-700 px-3 py-0.5 rounded-full uppercase tracking-wider">{studentProfile?.current_class || 'Student'}</span>
+         <h3 className="font-black text-black text-xl mt-4 leading-tight">{studentProfile?.full_name}</h3>
+         <span className="text-xs font-bold bg-black text-[#FFD700] px-4 py-1 rounded-full mt-2 inline-block uppercase tracking-widest shadow-sm">
+           {studentProfile?.current_class}
+         </span>
       </div>
-      <nav className="flex-1 text-yellow-300 px-4 py-6 space-y-2">
-        <button onClick={() => { setActiveTab('overview'); setIsMobileMenuOpen(false); }} className={`w-full flex items-center text-yellow-400 gap-3 px-4 py-3 rounded-lg font-medium ${activeTab === 'overview' ? 'bg-black text-yellow-300 shadow-lg' : 'hover:bg-gray-800 text-green-100'}`}><User size={20} /> My Profile</button>
-        <button onClick={() => { setActiveTab('results'); setIsMobileMenuOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 text-yellow-400 rounded-lg font-medium ${activeTab === 'results' ? 'bg-black text-yellow-300 shadow-lg' : 'hover:bg-gray-800 text-green-100'}`}><FileText size={20} /> Check Result</button>
+      
+      <nav className="flex-1 p-4 space-y-3 mt-4">
+        <button onClick={() => { setActiveTab('result'); setIsMobileMenuOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-4 rounded-xl font-bold transition-all ${activeTab === 'result' ? 'bg-black text-[#FFD700] shadow-lg translate-x-2' : 'text-gray-900 hover:bg-yellow-300'}`}>
+          <FileText size={20} /> Check Result
+        </button>
+        <button onClick={() => { setActiveTab('profile'); setIsMobileMenuOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-4 rounded-xl font-bold transition-all ${activeTab === 'profile' ? 'bg-black text-[#FFD700] shadow-lg translate-x-2' : 'text-gray-900 hover:bg-yellow-300'}`}>
+          <User size={20} /> My Profile
+        </button>
       </nav>
-      <div className="p-6 bg-black mt-auto"><button onClick={() => { localStorage.clear(); navigate('/'); }} className="w-full py-3 bg-red-600 hover:bg-red-900 text-white hover:text-white/25 rounded-xl flex items-center justify-center gap-2 font-bold transition-all"><LogOut size={18} /> Logout</button></div>
+      
+      <div className="p-6">
+        <button onClick={() => { localStorage.clear(); navigate('/'); }} className="w-full py-4 bg-red-600 text-white hover:bg-red-700 rounded-xl flex items-center justify-center gap-2 font-black shadow-lg transition-all uppercase tracking-wider">
+          <LogOut size={18} /> Logout
+        </button>
+      </div>
     </div>
   );
 
   return (
-    <div className="min-h-screen bg-white font-sans flex flex-col md:flex-row">
-      <SEO title="Student Portal" description="Check results" noindex={true} />
-      <header className="md:hidden p-4 bg-yellow-300 text-black border-b flex justify-between items-center sticky top-0 z-20">
-         <div className="font-bold text-black"> <img src={logo} className="h-8 w-8 inline rounded-full mr-2" /> Student Portal</div>
-         <button onClick={() => setIsMobileMenuOpen(true)}><Menu className="text-black" /></button>
+    <div className="min-h-screen bg-gray-100 font-sans flex flex-col md:flex-row selection:bg-yellow-300">
+      <SEO title="Student Portal | Citadel" description="Student Area" noindex={true} />
+      
+      <header className="md:hidden p-4 bg-[#FFD700] border-b-4 border-black flex justify-between items-center sticky top-0 z-20 shadow-md">
+        <div className="flex items-center gap-2">
+           <div className="w-10 h-10 rounded-full bg-white flex items-center justify-center p-1 border-2 border-red-600">
+             <img src={logo} alt="Logo" className="w-full h-full object-contain" />
+           </div>
+           <span className="font-black text-black tracking-wide uppercase">Student Portal</span>
+        </div>
+        <button onClick={() => setIsMobileMenuOpen(true)} className="p-2 text-black hover:bg-yellow-300 rounded-lg"><Menu size={24} /></button>
       </header>
-      <aside className="hidden md:flex w-72 bg-white shadow-xl sticky top-0 h-screen z-30 flex-col"><SidebarContent /></aside>
-      <Sheet open={isMobileMenuOpen} onOpenChange={setIsMobileMenuOpen}><SheetContent side="left" className="p-0 w-72 bg-white border-none"><SidebarContent /></SheetContent></Sheet>
 
-      <main className="flex-1 h-screen overflow-y-auto">
-        <div className="p-6 md:p-10 max-w-5xl mx-auto">
-          {activeTab === 'overview' && (
-            <div className="space-y-6 animate-in fade-in">
-              <h1 className="text-3xl font-bold text-black">Welcome, {studentProfile?.full_name?.split(' ')[0]}! </h1>
-              <div className="bg-white rounded-3xl p-8 shadow-sm border border-yellow-100 grid md:grid-cols-2 gap-8 items-center">
-                 <div className="space-y-4">
-                    <div className="flex items-center gap-4"><div className="w-12 h-12 bg-yellow-50 rounded-full flex items-center justify-center text-yellow-600"><User /></div><div><p className="text-xs text-gray-400 uppercase font-bold">Full Name</p><p className="font-bold text-gray-800 text-lg">{studentProfile?.full_name}</p></div></div>
-                    <div className="flex items-center gap-4"><div className="w-12 h-12 bg-yellow-50 rounded-full flex items-center justify-center text-yellow-600"><School /></div><div><p className="text-xs text-gray-400 uppercase font-bold">Class</p><p className="font-bold text-gray-800 text-lg">{studentProfile?.current_class}</p></div></div>
-                 </div>
-                 {/* UPDATED: Dynamic Resumption Date Display */}
-                 <div className="bg-black rounded-2xl p-6 text-white text-center">
-                    <GraduationCap size={48} className="mx-auto mb-4 text-yellow-300" />
-                    <h3 className="font-bold text-xl">Next Term Begins</h3>
-                    <p className="text-yellow-200 mt-2">{resumptionDate}</p>
-                 </div>
-              </div>
-            </div>
-          )}
+      <aside className="hidden md:flex w-72 shadow-2xl flex-col sticky top-0 h-screen z-30 shrink-0"><SidebarContent /></aside>
+      <Sheet open={isMobileMenuOpen} onOpenChange={setIsMobileMenuOpen}><SheetContent side="left" className="p-0 w-72 border-none"><SidebarContent /></SheetContent></Sheet>
 
-          {activeTab === 'results' && (
-             <div className="space-y-6 animate-in fade-in">
-               <h1 className="text-2xl font-bold text-[#064e3b]">Result Checker</h1>
-               {/* ... (Rest of Result Checker logic remains same) ... */}
-               <div className="bg-white p-6 rounded-2xl shadow-sm border border-green-100 flex flex-col md:flex-row gap-4 items-end">
-                  <div className="w-full"><label className="text-xs font-bold text-gray-500 uppercase">Session</label><select value={selectedSession} onChange={e => setSelectedSession(e.target.value)} className="w-full p-3 bg-gray-50 border rounded-xl font-bold"><option>2025/2026</option></select></div>
-                  <div className="w-full"><label className="text-xs font-bold text-gray-500 uppercase">Term</label><select value={selectedTerm} onChange={e => setSelectedTerm(e.target.value)} className="w-full p-3 bg-gray-50 border rounded-xl font-bold"><option>1st Term</option></select></div>
-                  <button onClick={handleCheckResult} disabled={loading} className="w-full md:w-auto px-8 py-3 bg-[#064e3b] text-white font-bold rounded-xl hover:bg-green-900">{loading ? 'Checking...' : 'Check Result'}</button>
-               </div>
+      <main className="flex-1 h-[calc(100vh-76px)] md:h-screen overflow-y-auto">
+        <div className="p-4 md:p-8 max-w-5xl mx-auto">
+           
+           {activeTab === 'result' && (
+             <div className="animate-in fade-in space-y-6">
+                <div className="flex flex-col md:flex-row justify-between md:items-end gap-4 print-hide">
+                  <div>
+                    <h1 className="text-3xl md:text-4xl font-black text-gray-900 tracking-tight">Result Checker</h1>
+                    <p className="text-gray-500 font-medium mt-1">View and print your official termly report card.</p>
+                  </div>
+                </div>
+                
+                {/* Check Filters */}
+                <div className="bg-white p-4 md:p-6 rounded-2xl shadow-sm border-l-4 border-[#FFD700] flex flex-col md:flex-row gap-4 items-end print-hide">
+                    <div className="w-full md:flex-1">
+                        <label className="text-xs font-black text-gray-400 uppercase tracking-widest mb-2 block">Session</label>
+                        <select value={selectedSession} onChange={(e) => setSelectedSession(e.target.value)} className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl font-bold text-gray-900 outline-none focus:ring-2 focus:ring-yellow-400 transition-all">
+                            <option>2025/2026</option>
+                            <option>2024/2025</option>
+                        </select>
+                    </div>
+                    <div className="w-full md:flex-1">
+                        <label className="text-xs font-black text-gray-400 uppercase tracking-widest mb-2 block">Term</label>
+                        <select value={selectedTerm} onChange={(e) => setSelectedTerm(e.target.value)} className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl font-bold text-gray-900 outline-none focus:ring-2 focus:ring-yellow-400 transition-all">
+                            <option>1st Term</option>
+                            <option>2nd Term</option>
+                            <option>3rd Term</option>
+                        </select>
+                    </div>
+                    <button onClick={handleCheckResult} disabled={loading} className="w-full md:w-auto px-8 py-3 bg-red-600 text-white font-black rounded-xl shadow-lg hover:bg-red-700 transition-all disabled:opacity-50 whitespace-nowrap uppercase tracking-wider">
+                        {loading ? 'Checking...' : 'Check Result'}
+                    </button>
+                </div>
 
-               {hasChecked && !accessGranted && !loading && (
-                  <div className="bg-red-50 border border-red-100 rounded-2xl p-8 text-center"><Lock size={32} className="mx-auto text-red-600 mb-2"/><h3 className="text-xl font-bold text-red-900">Locked</h3><p className="text-red-700">Please purchase a PIN.</p></div>
-               )}
+                {/* Result Sheet View */}
+                {results.length > 0 && (
+                  <div className="space-y-4">
+                    <div className="flex justify-end print-hide">
+                       <button onClick={() => window.print()} className="px-6 py-3 bg-black text-[#FFD700] font-black rounded-xl shadow-lg hover:bg-gray-900 transition-all flex items-center gap-2 uppercase tracking-wider">
+                           <Printer size={18}/> Print A4 Report
+                       </button>
+                    </div>
 
-               {accessGranted && (
-                  <div className="space-y-6 animate-in slide-in-from-bottom duration-500">
-                     <div className="bg-white rounded-2xl shadow-lg border border-green-100 overflow-hidden">
-                        <div className="p-4 bg-[#064e3b] text-white flex justify-between items-center">
-                           <h3 className="font-bold flex items-center gap-2"><CheckCircle size={20}/> Result Sheet</h3>
-                           <button onClick={downloadResult} className="bg-white text-[#064e3b] px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-2 hover:bg-green-50"><Download size={14}/> Download PDF</button>
+                    {/* STRICT A4 PRINTABLE AREA */}
+                    <div id="result-print-area" className="bg-white rounded-xl md:rounded-2xl shadow-xl border border-gray-200 mx-auto w-full max-w-[210mm] relative overflow-hidden md:overflow-visible">
+                        
+                        <style>{`
+                          @media print {
+                            body * { visibility: hidden; }
+                            #result-print-area, #result-print-area * { visibility: visible; }
+                            #result-print-area { 
+                                position: absolute; left: 0; top: 0; width: 100%; max-width: 100%;
+                                margin: 0; padding: 0; box-shadow: none; border: none; background: white;
+                                color: black !important;
+                            }
+                            @page { size: A4 portrait; margin: 10mm; }
+                            * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+                            .print-hide { display: none !important; }
+                            .page-break-avoid { page-break-inside: avoid; }
+                          }
+                        `}</style>
+
+                        {/* WATERMARK */}
+                        <div className="absolute inset-0 flex items-center justify-center opacity-[0.06] pointer-events-none z-0 overflow-hidden">
+                           <img src={logo} alt="Watermark" className="w-[80%] max-w-[400px] aspect-square object-contain" />
                         </div>
-                        <div className="p-6">
-                            {/* NEW: REPORT SUMMARY SECTION */}
-                            {reportDetails && (
-                                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8 bg-green-50 p-4 rounded-xl border border-green-100">
-                                    <div>
-                                        <h4 className="font-bold text-[#064e3b] mb-2 uppercase text-xs">Attendance</h4>
-                                        <div className="text-sm">
-                                            <p>Opened: <b>{reportDetails.days_school_open}</b></p>
-                                            <p>Present: <b>{reportDetails.days_present}</b></p>
-                                            <p>Absent: <b>{reportDetails.days_absent}</b></p>
+
+                        <div className="relative z-10 p-4 sm:p-6 md:p-8">
+                            {/* A4 HEADER */}
+                            <div className="flex flex-col sm:flex-row items-center justify-between border-b-[3px] border-black pb-4 mb-4 gap-4">
+                               <img src={logo} alt="Logo" className="w-20 h-20 sm:w-24 sm:h-24 object-contain shrink-0" />
+                               <div className="text-center flex-1 px-2 sm:px-4">
+                                   <h1 className="text-xl sm:text-2xl md:text-3xl font-black text-red-700 uppercase tracking-wide">Citadel of Knowledge</h1>
+                                   <h2 className="text-base sm:text-lg md:text-xl font-bold text-gray-800 uppercase tracking-widest">International School</h2>
+                                   <p className="text-[10px] sm:text-xs md:text-sm font-medium text-gray-600 mt-1">Adjacent First Bank, Saw-Mill Area, Lagos Road, Ilorin, Kwara State.</p>
+                               </div>
+                               {/* Student Passport Placeholder for Print */}
+                               <div className="w-16 h-20 sm:w-20 sm:h-24 border-2 border-gray-300 flex items-center justify-center bg-gray-50 shrink-0">
+                                   {studentProfile?.passport_url ? <img src={studentProfile.passport_url} className="w-full h-full object-cover"/> : <span className="text-[8px] sm:text-[10px] text-gray-400 uppercase font-bold text-center px-1">Passport Photo</span>}
+                               </div>
+                            </div>
+                            
+                            <div className="text-center bg-[#FFD700] text-black border-2 border-black py-1.5 font-black uppercase text-xs sm:text-sm md:text-base shadow-sm mb-4">
+                                TERMLY REPORT SHEET - {selectedTerm} {selectedSession}
+                            </div>
+
+                            {/* BIO DATA GRID */}
+                            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2 text-xs md:text-sm border-2 border-black p-3 bg-gray-50 mb-4 font-medium">
+                               <div className="sm:col-span-2 flex"><span className="w-24 sm:w-28 font-bold text-gray-700 uppercase shrink-0">Name:</span> <span className="font-black border-b border-gray-400 flex-1 truncate">{studentProfile?.full_name}</span></div>
+                               <div className="sm:col-span-2 flex"><span className="w-28 font-bold text-gray-700 uppercase shrink-0">Admission No:</span> <span className="font-black border-b border-gray-400 flex-1 truncate">{studentProfile?.admission_number}</span></div>
+                               <div className="flex"><span className="w-16 font-bold text-gray-700 uppercase shrink-0">Class:</span> <span className="font-black border-b border-gray-400 flex-1 truncate">{studentProfile?.current_class}</span></div>
+                               <div className="flex"><span className="w-16 font-bold text-gray-700 uppercase shrink-0">Gender:</span> <span className="font-black border-b border-gray-400 flex-1 truncate">{studentProfile?.gender || '-'}</span></div>
+                               <div className="sm:col-span-2 flex"><span className="w-32 font-bold text-gray-700 uppercase shrink-0">Next Term Begins:</span> <span className="font-black border-b border-gray-400 flex-1 truncate">{nextTermBegins || 'TBD'}</span></div>
+                            </div>
+
+                            {/* SCORES TABLE */}
+                            <div className="overflow-x-auto border-2 border-black mb-4">
+                              <table className="w-full text-left text-[10px] sm:text-xs md:text-sm border-collapse min-w-[500px]">
+                                <thead className="bg-red-700 text-white font-bold">
+                                  <tr>
+                                    <th className="p-1.5 sm:p-2 border border-black uppercase text-center w-8">S/N</th>
+                                    <th className="p-1.5 sm:p-2 border border-black uppercase">SUBJECT</th>
+                                    <th className="p-1.5 sm:p-2 text-center border border-black w-12 sm:w-14">1ST CA<br/><span className="text-[8px] sm:text-[10px] font-normal">(20)</span></th>
+                                    <th className="p-1.5 sm:p-2 text-center border border-black w-12 sm:w-14">2ND CA<br/><span className="text-[8px] sm:text-[10px] font-normal">(20)</span></th>
+                                    <th className="p-1.5 sm:p-2 text-center border border-black w-12 sm:w-14">EXAM<br/><span className="text-[8px] sm:text-[10px] font-normal">(60)</span></th>
+                                    <th className="p-1.5 sm:p-2 text-center border border-black w-12 sm:w-14 text-[#FFD700]">TOTAL<br/><span className="text-[8px] sm:text-[10px] font-normal text-white">(100)</span></th>
+                                    <th className="p-1.5 sm:p-2 text-center border border-black w-12 sm:w-16">GRADE</th>
+                                    <th className="p-1.5 sm:p-2 text-center border border-black w-20 sm:w-24">REMARK</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                   {results.map((res, i) => (
+                                     <tr key={i} className="even:bg-gray-50 border-b border-gray-300 last:border-b-0">
+                                       <td className="p-1 sm:p-1.5 text-center border-r border-gray-300 font-bold text-gray-500">{i + 1}</td>
+                                       <td className="p-1 sm:p-1.5 font-bold text-gray-900 border-r border-gray-300 uppercase text-[9px] sm:text-[11px] md:text-sm truncate max-w-[100px] sm:max-w-[150px]">{res.subject}</td>
+                                       <td className="p-1 sm:p-1.5 text-center font-medium border-r border-gray-300">{res.ca1_score || '-'}</td>
+                                       <td className="p-1 sm:p-1.5 text-center font-medium border-r border-gray-300">{res.ca2_score || '-'}</td>
+                                       <td className="p-1 sm:p-1.5 text-center font-medium border-r border-gray-300">{res.exam_score || '-'}</td>
+                                       <td className="p-1 sm:p-1.5 text-center font-black border-r border-black bg-yellow-50">{res.total_score}</td>
+                                       <td className={`p-1 sm:p-1.5 text-center font-black border-r border-gray-300 ${res.grade === 'A' || res.grade === 'B' ? 'text-green-700' : res.grade === 'C' || res.grade === 'D' ? 'text-yellow-600' : 'text-red-600'}`}>{res.grade}</td>
+                                       <td className="p-1 sm:p-1.5 text-center text-[8px] sm:text-[10px] md:text-xs font-bold text-gray-600 uppercase tracking-wider truncate max-w-[80px] sm:max-w-[100px]">{res.remarks}</td>
+                                     </tr>
+                                   ))}
+                                </tbody>
+                              </table>
+                            </div>
+
+                            {/* SUMMARY, SKILLS & ATTENDANCE */}
+                            <div className="flex flex-col md:flex-row gap-4 mb-4 page-break-avoid text-xs md:text-sm">
+                               {/* Left Side: Summary & Attendance */}
+                               <div className="flex-1 space-y-4">
+                                   <div className="border-2 border-black flex">
+                                       <div className="bg-red-700 text-white font-bold p-2 w-1/2 flex items-center uppercase text-[10px] sm:text-xs">Total Score</div>
+                                       <div className="p-2 font-black text-center flex-1">{totalScore}</div>
+                                   </div>
+                                   <div className="border-2 border-black flex">
+                                       <div className="bg-red-700 text-white font-bold p-2 w-1/2 flex items-center uppercase text-[10px] sm:text-xs">Overall Average</div>
+                                       <div className="p-2 font-black text-center flex-1 text-red-600 text-base sm:text-lg">{averageScore}%</div>
+                                   </div>
+                                   <div className="border-2 border-black">
+                                       <div className="bg-gray-200 text-black font-bold p-1 text-center border-b-2 border-black uppercase text-[10px] sm:text-xs">Attendance</div>
+                                       <div className="p-2 space-y-1 text-[10px] sm:text-xs">
+                                           <div className="flex justify-between font-medium"><span>Days School Opened:</span> <span className="font-bold">{reportDetails?.days_school_open || '-'}</span></div>
+                                           <div className="flex justify-between font-medium"><span>Days Present:</span> <span className="font-bold">{reportDetails?.days_present || '-'}</span></div>
+                                           <div className="flex justify-between font-medium"><span>Days Absent:</span> <span className="font-bold">{reportDetails?.days_absent || '-'}</span></div>
+                                       </div>
+                                   </div>
+                               </div>
+
+                               {/* Middle: Psychomotor */}
+                               <div className="flex-1 border-2 border-black">
+                                  <div className="bg-gray-200 text-black font-bold p-1 text-center border-b-2 border-black uppercase text-[9px] sm:text-[10px] md:text-xs tracking-wider">Psychomotor Domain</div>
+                                  <div className="p-1">
+                                     {PSYCHOMOTOR_KEYS.map(k => (
+                                        <div key={k} className="flex justify-between text-[9px] sm:text-[11px] md:text-xs border-b border-gray-200 last:border-0 px-1 py-0.5">
+                                            <span className="uppercase text-gray-700">{k}</span> 
+                                            <span className="font-black">{reportDetails?.psychomotor_skills?.[k] || '-'}</span>
                                         </div>
-                                    </div>
-                                    <div>
-                                        <h4 className="font-bold text-[#064e3b] mb-2 uppercase text-xs">Remarks</h4>
-                                        <p className="text-sm italic text-gray-700">"{reportDetails.class_teacher_remark || 'No remark'}"</p>
-                                        <p className="text-xs text-gray-500 mt-1">- Class Teacher</p>
-                                    </div>
-                                    <div>
-                                        <h4 className="font-bold text-[#064e3b] mb-2 uppercase text-xs">Summary</h4>
-                                        <div className="text-sm">
-                                            <p>Total Score: <b>{totalScore}</b></p>
-                                            <p>Average: <b>{average}%</b></p>
+                                     ))}
+                                  </div>
+                                  <div className="p-1 text-[8px] sm:text-[9px] text-center border-t border-gray-300 text-gray-500 mt-1">Scale: 5-Excellent, 4-Very Good, 3-Good, 2-Fair, 1-Poor</div>
+                               </div>
+
+                               {/* Right: Affective */}
+                               <div className="flex-1 border-2 border-black">
+                                  <div className="bg-gray-200 text-black font-bold p-1 text-center border-b-2 border-black uppercase text-[9px] sm:text-[10px] md:text-xs tracking-wider">Affective Domain</div>
+                                  <div className="p-1">
+                                     {AFFECTIVE_KEYS.map(k => (
+                                        <div key={k} className="flex justify-between text-[9px] sm:text-[11px] md:text-xs border-b border-gray-200 last:border-0 px-1 py-0.5">
+                                            <span className="uppercase text-gray-700">{k}</span> 
+                                            <span className="font-black">{reportDetails?.affective_skills?.[k] || '-'}</span>
                                         </div>
+                                     ))}
+                                  </div>
+                               </div>
+                            </div>
+
+                            {/* REMARKS & SIGNATURES */}
+                            <div className="space-y-4 page-break-avoid border-2 border-black p-3 sm:p-4 text-xs sm:text-sm bg-yellow-50/50">
+                                <div>
+                                    <span className="font-bold uppercase underline text-red-800">Class Teacher's Remark:</span>
+                                    <span className="ml-2 font-serif italic font-medium">"{reportDetails?.class_teacher_remark || 'Satisfactory performance.'}"</span>
+                                </div>
+                                <div className="pt-6 mt-4 flex justify-between items-end">
+                                    <div className="text-center w-1/2 pr-2">
+                                       <div className="w-full max-w-[160px] mx-auto border-b border-black mb-1"></div>
+                                       <span className="text-[8px] sm:text-[10px] font-bold uppercase tracking-widest text-gray-600 line-clamp-1">Class Teacher's Signature</span>
+                                    </div>
+                                    <div className="text-center w-1/2 pl-2">
+                                       <div className="w-full max-w-[160px] mx-auto border-b border-black mb-1"></div>
+                                       <span className="text-[8px] sm:text-[10px] font-bold uppercase tracking-widest text-gray-600 line-clamp-1">Principal's Signature & Date</span>
                                     </div>
                                 </div>
-                            )}
-
-                            {/* ACADEMIC TABLE */}
-                            <div className="overflow-x-auto">
-                                <table className="w-full text-left text-sm">
-                                    <thead className="bg-green-100 text-[#064e3b]"><tr><th className="p-3">Subject</th><th className="p-3 text-center">CA</th><th className="p-3 text-center">Exam</th><th className="p-3 text-center">Total</th><th className="p-3 text-center">Grade</th><th className="p-3">Remark</th></tr></thead>
-                                    <tbody className="divide-y divide-green-50">
-                                        {resultData.map((res) => (
-                                            <tr key={res.id} className="hover:bg-green-50/30">
-                                                <td className="p-3 font-bold">{res.subject}</td>
-                                                <td className="p-3 text-center text-gray-500">{(res.ca1_score||0)+(res.ca2_score||0)}</td>
-                                                <td className="p-3 text-center text-gray-500">{res.exam_score}</td>
-                                                <td className="p-3 text-center font-bold text-[#064e3b]">{res.total_score}</td>
-                                                <td className={`p-3 text-center font-bold ${res.total_score < 40 ? 'text-red-500' : 'text-green-600'}`}>{res.grade}</td>
-                                                <td className="p-3 text-xs italic text-gray-500">{res.remarks}</td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
                             </div>
                         </div>
-                     </div>
+                    </div>
                   </div>
-               )}
+                )}
+
+                {/* Empty State */}
+                {!loading && results.length === 0 && selectedTerm && (
+                  <div className="bg-white p-10 sm:p-16 text-center rounded-3xl border-2 border-dashed border-yellow-400 text-gray-400 shadow-sm mt-8 print-hide mx-4 md:mx-0">
+                     <CheckCircle size={48} className="mx-auto mb-4 text-yellow-400 opacity-50 sm:w-14 sm:h-14"/>
+                     <h3 className="text-lg sm:text-xl font-black text-gray-900 mb-2">No Results Yet</h3>
+                     <p className="font-medium text-gray-500 text-sm sm:text-base">Your approved results for {selectedTerm} will appear here.</p>
+                  </div>
+                )}
              </div>
-          )}
+           )}
+
+           {activeTab === 'profile' && (
+             <div className="bg-white p-6 sm:p-8 md:p-12 text-center rounded-3xl shadow-lg border-t-8 border-[#FFD700] max-w-xl mx-auto animate-in fade-in print-hide mt-4 md:mt-0">
+                <div className="w-24 h-24 sm:w-32 sm:h-32 mx-auto bg-[#FFD700] rounded-full flex items-center justify-center mb-6 border-4 border-black overflow-hidden">
+                  {studentProfile?.passport_url ? <img src={studentProfile.passport_url} className="w-full h-full object-cover"/> : <span className="text-4xl sm:text-5xl text-black font-black">{studentProfile?.full_name?.[0]}</span>}
+                </div>
+                <h2 className="text-2xl sm:text-3xl font-black text-gray-900">{studentProfile?.full_name}</h2>
+                <p className="text-[#FFD700] font-black text-xs sm:text-sm uppercase tracking-widest mt-3 bg-black py-1.5 px-6 rounded-full inline-block shadow-md">{studentProfile?.current_class}</p>
+                
+                <div className="mt-8 sm:mt-10 text-left space-y-4">
+                  <div className="bg-gray-50 p-4 sm:p-5 rounded-xl border border-gray-200 border-l-4 border-l-black">
+                    <p className="text-[10px] sm:text-xs font-black text-gray-400 uppercase tracking-widest mb-1">Admission Number</p>
+                    <p className="font-black text-red-600 text-lg sm:text-xl font-mono truncate">{studentProfile?.admission_number}</p>
+                  </div>
+                  <div className="bg-gray-50 p-4 sm:p-5 rounded-xl border border-gray-200 border-l-4 border-l-black grid grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-[10px] sm:text-xs font-black text-gray-400 uppercase tracking-widest mb-1">Gender</p>
+                      <p className="font-black text-gray-900 truncate">{studentProfile?.gender || 'N/A'}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] sm:text-xs font-black text-gray-400 uppercase tracking-widest mb-1">Date of Birth</p>
+                      <p className="font-black text-gray-900 truncate">{studentProfile?.dob || 'N/A'}</p>
+                    </div>
+                  </div>
+                  <div className="bg-[#FFD700]/10 p-4 sm:p-5 rounded-xl border border-[#FFD700] border-l-4 border-l-red-600">
+                    <p className="text-[10px] sm:text-xs font-black text-red-600 uppercase tracking-widest mb-1">Parent Phone / Emergency</p>
+                    <p className="font-black text-gray-900 text-lg sm:text-xl truncate">{studentProfile?.parent_phone}</p>
+                  </div>
+                </div>
+             </div>
+           )}
+
         </div>
       </main>
     </div>
