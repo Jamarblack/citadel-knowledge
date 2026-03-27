@@ -1,8 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { 
-  LogOut, LayoutDashboard, Upload, Save, User, 
-  BookOpen, Calendar, CheckCircle, Search, X, Menu, Camera
+  LogOut, Upload, Save, BookOpen, CheckCircle, X, Menu, Camera, Send, FileEdit
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
@@ -10,7 +9,6 @@ import { Sheet, SheetContent } from "@/components/ui/sheet";
 import SEO from "@/components/SEO";
 import Logo from "/school-logo.png"; 
 
-// --- CONSTANTS ---
 const PSYCHOMOTOR_KEYS = ["Handwriting", "Sports", "Fluency", "Drawing", "Handling Tools"];
 const AFFECTIVE_KEYS = ["Punctuality", "Neatness", "Politeness", "Honesty", "Leadership", "Attentiveness"];
 
@@ -21,28 +19,29 @@ const TeacherDashboard = () => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [globalSettings, setGlobalSettings] = useState({ session: '2025/2026', term: '1st Term' });
 
-  // Data
   const [myClassStudents, setMyClassStudents] = useState<any[]>([]);
   const [selectedStudent, setSelectedStudent] = useState<any>(null);
   
-  // Upload States
   const [uploadClass, setUploadClass] = useState("");
   const [uploadSubject, setUploadSubject] = useState("");
-  const [uploadStudents, setUploadStudents] = useState<any[]>([]);
   const [scoreEntries, setScoreEntries] = useState<any[]>([]);
   const [subjects, setSubjects] = useState<any[]>([]);
 
-  // Report Modal
   const [reportData, setReportData] = useState<any>({ attendance: { open: 110, present: 0, absent: 0 }, psychomotor: {}, affective: {}, remark: "" });
   const [studentGrades, setStudentGrades] = useState<any[]>([]);
 
   useEffect(() => {
     const id = localStorage.getItem('staffId');
     if (!id) navigate('/');
-    fetchProfile(id!);
-    fetchSubjects();
+    fetchProfile(id!); fetchSubjects(); fetchSettings();
   }, []);
+
+  const fetchSettings = async () => {
+    const { data } = await supabase.from('school_settings').select('*').single();
+    if (data) setGlobalSettings({ session: data.current_session, term: data.current_term });
+  };
 
   const fetchProfile = async (id: string) => {
     const { data } = await supabase.from('staff').select('*').eq('id', id).single();
@@ -62,39 +61,159 @@ const TeacherDashboard = () => {
     if (data) setMyClassStudents(data);
   };
 
-  // --- PROFILE UPLOAD ---
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     if (!event.target.files?.length || !teacherProfile) return;
     setUploading(true);
     try {
         const file = event.target.files[0];
-        const fileExt = file.name.split('.').pop();
-        const filePath = `staff_${teacherProfile.id}_${Math.random()}.${fileExt}`;
-        
-        const { error: uploadError } = await supabase.storage.from('passports').upload(filePath, file);
-        if (uploadError) throw uploadError;
-        
+        const filePath = `staff_${teacherProfile.id}_${Math.random()}.${file.name.split('.').pop()}`;
+        await supabase.storage.from('passports').upload(filePath, file);
         const { data: { publicUrl } } = supabase.storage.from('passports').getPublicUrl(filePath);
-        
-        const { error: updateError } = await supabase.from('staff').update({ passport_url: publicUrl }).eq('id', teacherProfile.id);
-        if (updateError) throw updateError;
-        
+        await supabase.from('staff').update({ passport_url: publicUrl }).eq('id', teacherProfile.id);
         setTeacherProfile({ ...teacherProfile, passport_url: publicUrl });
         toast.success("Profile Photo Updated");
-    } catch (e: any) {
-        toast.error("Upload failed: " + e.message);
-    } finally {
-        setUploading(false);
+    } catch (e: any) { toast.error("Upload failed: " + e.message); } finally { setUploading(false); }
+  };
+
+  const calculateGradeAndRemarks = (totalScore: number, studentClass: string) => {
+    const isSecondary = studentClass.includes("JSS") || studentClass.includes("SS");
+    if (isSecondary) {
+      if (totalScore >= 80) return { grade: 'A', remarks: 'Excellent' };
+      if (totalScore >= 70) return { grade: 'B', remarks: 'Very Good' };
+      if (totalScore >= 60) return { grade: 'C', remarks: 'Good' };
+      if (totalScore >= 50) return { grade: 'D', remarks: 'Average' };
+      if (totalScore >= 45) return { grade: 'E', remarks: 'Pass' };
+      return { grade: 'F', remarks: 'Fail' };
+    } else {
+      if (totalScore >= 70) return { grade: 'A', remarks: 'Excellent' };
+      if (totalScore >= 60) return { grade: 'B', remarks: 'Very Good' };
+      if (totalScore >= 50) return { grade: 'C', remarks: 'Good' };
+      if (totalScore >= 40) return { grade: 'D', remarks: 'Fair' };
+      return { grade: 'F', remarks: 'Fail' };
     }
   };
 
-  // --- REPORT CARD LOGIC ---
+  const loadClassAndSubject = async (selectedClass: string, selectedSubject: string) => {
+    setUploadClass(selectedClass);
+    setUploadSubject(selectedSubject);
+    if (!selectedClass || !selectedSubject) return;
+
+    setLoading(true);
+    try {
+      const { data: students } = await supabase.from('students').select('*').eq('current_class', selectedClass).order('full_name');
+      if (!students) return;
+
+      const { data: existingResults } = await supabase.from('results')
+        .select('*')
+        .eq('class_level', selectedClass)
+        .eq('subject', selectedSubject)
+        .eq('term', globalSettings.term)
+        .eq('session', globalSettings.session);
+
+      const mergedEntries = students.map(student => {
+        const existing = existingResults?.find(r => r.student_id === student.id);
+        return {
+          student_id: student.id,
+          student_name: student.full_name,
+          admission_number: student.admission_number,
+          ca1: existing?.ca1_score !== null && existing?.ca1_score !== undefined ? existing.ca1_score : '',
+          ca2: existing?.ca2_score !== null && existing?.ca2_score !== undefined ? existing.ca2_score : '',
+          exam: existing?.exam_score !== null && existing?.exam_score !== undefined ? existing.exam_score : '',
+          grade: existing?.grade || '',
+          status: existing?.status || 'new', 
+          position: existing?.position || '-'
+        };
+      });
+
+      setScoreEntries(mergedEntries);
+    } catch (e: any) {
+      toast.error("Error loading class list.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleScoreChange = (index: number, field: string, value: string) => {
+    const newEntries = [...scoreEntries]; 
+    newEntries[index][field] = value;
+    
+    const withTotals = newEntries.map(e => ({ ...e, total: (Number(e.ca1)||0) + (Number(e.ca2)||0) + (Number(e.exam)||0) }));
+    const sorted = [...withTotals].sort((a,b) => b.total - a.total);
+    
+    setScoreEntries(withTotals.map(e => {
+        const rank = sorted.findIndex(s => s.total === e.total) + 1;
+        const s = ["th","st","nd","rd"], v = rank%100;
+        const { grade } = calculateGradeAndRemarks(e.total, uploadClass);
+
+        return { 
+            ...e, 
+            grade: (e.ca1 !== '' || e.ca2 !== '' || e.exam !== '') ? grade : '', 
+            position: (e.total > 0 && (e.ca1 !== '' || e.ca2 !== '' || e.exam !== '')) ? rank+(s[(v-20)%10]||s[v]||s[0]) : '-' 
+        };
+    }));
+  };
+
+  const processUpload = async (targetStatus: 'draft' | 'pending') => {
+    if (!uploadSubject || !uploadClass) return toast.error("Select Class & Subject");
+    
+    const validEntries = scoreEntries.filter(e => e.ca1 !== '' || e.ca2 !== '' || e.exam !== '');
+    if (validEntries.length === 0) return toast.error("No scores entered yet!");
+
+    if (validEntries.some(e => e.status === 'approved')) {
+      return toast.error("Some results in this batch are already approved by the admin and cannot be edited.");
+    }
+
+    setLoading(true);
+    try {
+        const formatted = validEntries.map(e => {
+            const total = (Number(e.ca1)||0)+(Number(e.ca2)||0)+(Number(e.exam)||0);
+            const { grade, remarks } = calculateGradeAndRemarks(total, uploadClass);
+
+            return {
+                student_id: e.student_id, 
+                student_name: e.student_name, 
+                admission_number: e.admission_number,
+                subject: uploadSubject, 
+                class_level: uploadClass, 
+                term: globalSettings.term, 
+                session: globalSettings.session,
+                teacher_id: teacherProfile.id, 
+                teacher_name: teacherProfile.full_name,
+                ca1_score: Number(e.ca1) || 0, 
+                ca2_score: Number(e.ca2) || 0, 
+                exam_score: Number(e.exam) || 0,
+                // Notice: 'total_score' has been COMPLETELY removed so Supabase can generate it itself!
+                grade: grade || 'F', 
+                position: e.position || '-', 
+                remarks: remarks || 'Fail', 
+                status: targetStatus 
+            };
+        });
+        
+        const { error } = await supabase.from('results').upsert(formatted, { onConflict: 'student_id, subject, term, session' });
+        
+        if (error) throw error;
+        
+        if (targetStatus === 'draft') {
+           toast.success("Draft Saved! You can come back and finish later.");
+           loadClassAndSubject(uploadClass, uploadSubject); 
+        } else {
+           toast.success("Results Submitted to Admin for Approval!");
+           setUploadClass(""); setUploadSubject(""); setScoreEntries([]);
+        }
+    } catch(e:any) { 
+        toast.error("Upload Failed: " + e.message); 
+    } finally { 
+        setLoading(false); 
+    }
+  };
+
   const openStudentReport = async (student: any) => {
     setSelectedStudent(student);
-    const { data: grades } = await supabase.from('results').select('subject, total_score, grade').eq('student_id', student.id).eq('term', '1st Term').eq('session', '2025/2026');
+    const { data: grades } = await supabase.from('results').select('subject, total_score, grade').eq('student_id', student.id).eq('term', globalSettings.term).eq('session', globalSettings.session);
     setStudentGrades(grades || []);
 
-    const { data: existingReport } = await supabase.from('term_reports').select('*').eq('student_id', student.id).eq('term', '1st Term').maybeSingle();
+    const { data: existingReport } = await supabase.from('term_reports').select('*').eq('student_id', student.id).eq('term', globalSettings.term).maybeSingle();
     
     if (existingReport) {
       setReportData({
@@ -113,7 +232,7 @@ const TeacherDashboard = () => {
     setLoading(true);
     try {
         const payload = {
-            student_id: selectedStudent.id, session: '2025/2026', term: '1st Term', class_level: teacherProfile.assigned_class,
+            student_id: selectedStudent.id, session: globalSettings.session, term: globalSettings.term, class_level: teacherProfile.assigned_class,
             days_school_open: reportData.attendance.open, days_present: reportData.attendance.present, days_absent: reportData.attendance.absent,
             psychomotor_skills: reportData.psychomotor, affective_skills: reportData.affective, class_teacher_remark: reportData.remark
         };
@@ -123,85 +242,6 @@ const TeacherDashboard = () => {
     } catch (e: any) { toast.error(e.message); } finally { setLoading(false); }
   };
 
-  // --- AUTOMATIC GRADING SYSTEM ---
-  const calculateGradeAndRemark = (totalScore: number, studentClass: string) => {
-    const isSecondary = studentClass.includes("JSS") || studentClass.includes("SS");
-
-    if (isSecondary) {
-      // SECONDARY GRADING SYSTEM
-      if (totalScore >= 80) return { grade: 'A', remark: 'Excellent' };
-      if (totalScore >= 70) return { grade: 'B', remark: 'Very Good' };
-      if (totalScore >= 60) return { grade: 'C', remark: 'Good' };
-      if (totalScore >= 50) return { grade: 'D', remark: 'Average' };
-      if (totalScore >= 45) return { grade: 'E', remark: 'Pass' };
-      return { grade: 'F', remark: 'Fail' };
-    } else {
-      // PRIMARY GRADING SYSTEM (Standardized)
-      if (totalScore >= 70) return { grade: 'A', remark: 'Excellent' };
-      if (totalScore >= 60) return { grade: 'B', remark: 'Very Good' };
-      if (totalScore >= 50) return { grade: 'C', remark: 'Good' };
-      if (totalScore >= 40) return { grade: 'D', remark: 'Fair' };
-      return { grade: 'F', remark: 'Fail' };
-    }
-  };
-
-  // --- RESULT UPLOAD LOGIC ---
-  const handleClassSelect = async (className: string) => {
-    setUploadClass(className); setLoading(true);
-    const { data } = await supabase.from('students').select('*').eq('current_class', className).order('full_name');
-    if (data) {
-        setUploadStudents(data);
-        setScoreEntries(data.map(s => ({ student_id: s.id, student_name: s.full_name, admission_number: s.admission_number, ca1: '', ca2: '', exam: '', position: '-', remarks: '' })));
-    }
-    setLoading(false);
-  };
-
-  const handleScoreChange = (index: number, field: string, value: string) => {
-    const newEntries = [...scoreEntries]; newEntries[index][field] = value;
-    const withTotals = newEntries.map(e => ({ ...e, total: (Number(e.ca1)||0) + (Number(e.ca2)||0) + (Number(e.exam)||0) }));
-    const sorted = [...withTotals].sort((a,b) => b.total - a.total);
-    
-    setScoreEntries(withTotals.map(e => {
-        const rank = sorted.findIndex(s => s.total === e.total) + 1;
-        const s = ["th","st","nd","rd"], v = rank%100;
-        
-        // Use our dynamic grading function!
-        const { grade, remark } = calculateGradeAndRemark(e.total, uploadClass);
-
-        return { 
-            ...e, 
-            grade, 
-            remarks: remark,
-            position: e.total > 0 ? rank+(s[(v-20)%10]||s[v]||s[0]) : '-' 
-        };
-    }));
-  };
-
-  const submitScores = async () => {
-    if (!uploadSubject || !uploadClass) return toast.error("Select Class & Subject");
-    if (scoreEntries.length === 0) return toast.error("No students found in this class.");
-
-    setLoading(true);
-    try {
-        const formatted = scoreEntries.map(e => {
-            const total = (Number(e.ca1)||0)+(Number(e.ca2)||0)+(Number(e.exam)||0);
-            return {
-                student_id: e.student_id, student_name: e.student_name, admission_number: e.admission_number,
-                subject: uploadSubject, class_level: uploadClass, term: '1st Term', session: '2025/2026',
-                teacher_id: teacherProfile.id, teacher_name: teacherProfile.full_name,
-                ca1_score: Number(e.ca1) || 0, ca2_score: Number(e.ca2) || 0, exam_score: Number(e.exam) || 0,
-                total_score: total, // Ensures broadsheet works!
-                grade: e.grade, 
-                position: e.position, remarks: e.remarks, status: 'pending'
-            };
-        });
-        const { error } = await supabase.from('results').insert(formatted);
-        if (error) throw error;
-        toast.success("Results Uploaded Successfully!"); 
-        setUploadClass(""); setUploadStudents([]); setScoreEntries([]);
-    } catch(e:any) { toast.error("Upload Failed: " + e.message); } finally { setLoading(false); }
-  };
-
   const filteredSubjects = subjects.filter(sub => sub.section === 'General' || sub.section === (teacherProfile?.section || 'Secondary'));
 
   const SidebarContent = () => (
@@ -209,10 +249,7 @@ const TeacherDashboard = () => {
        <div className="p-8 text-center bg-amber-50/50 border-b border-amber-100">
            <div className="w-24 h-24 mx-auto rounded-full bg-amber-900 border-4 border-amber-100 relative group overflow-hidden">
                {teacherProfile?.passport_url ? <img src={teacherProfile.passport_url} className="w-full h-full object-cover"/> : <span className="flex items-center justify-center h-full text-3xl font-bold text-white">{teacherProfile?.full_name?.[0]}</span>}
-               <label className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer">
-                   <Camera className="text-white" size={24} />
-                   <input type="file" className="hidden" accept="image/*" onChange={handleFileUpload} disabled={uploading} />
-               </label>
+               <label className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"><Camera className="text-white" size={24} /><input type="file" className="hidden" accept="image/*" onChange={handleFileUpload} disabled={uploading} /></label>
            </div>
            <h3 className="font-bold text-amber-950 mt-3 truncate px-2">{teacherProfile?.full_name}</h3>
            <span className="text-xs font-bold text-amber-600 uppercase tracking-widest">{teacherProfile?.section} Teacher</span>
@@ -228,14 +265,8 @@ const TeacherDashboard = () => {
   return (
     <div className="min-h-screen bg-[#f8f5f2] font-sans flex flex-col md:flex-row">
       <SEO title="Teacher Portal" description="Staff Area" noindex={true} />
-      
       <header className="md:hidden p-4 bg-white border-b border-amber-100 flex justify-between items-center sticky top-0 z-20">
-        <div className="flex items-center gap-2">
-           <div className="w-8 h-8 rounded-full bg-amber-900 text-white flex items-center justify-center font-bold">
-             {Logo ? <img src={Logo} alt="Logo" className="w-full h-full object-cover rounded-full" /> : (teacherProfile?.full_name?.[0] || 'T')}
-           </div>
-           <span className="font-bold text-amber-950">Staff Portal</span>
-        </div>
+        <div className="flex items-center gap-2"><div className="w-8 h-8 rounded-full bg-amber-900 text-white flex items-center justify-center font-bold">{Logo ? <img src={Logo} alt="Logo" className="w-full h-full object-cover rounded-full" /> : (teacherProfile?.full_name?.[0] || 'T')}</div><span className="font-bold text-amber-950">Staff Portal</span></div>
         <button onClick={() => setIsMobileMenuOpen(true)} className="p-2 text-amber-900 bg-amber-50 rounded-lg"><Menu size={24} /></button>
       </header>
 
@@ -264,47 +295,70 @@ const TeacherDashboard = () => {
 
            {activeTab === 'upload' && (
              <div className="animate-in fade-in space-y-6">
-                <h1 className="text-2xl font-bold text-amber-950">Upload Result Broadsheet</h1>
+                <h1 className="text-2xl font-bold text-amber-950">Subject Score Entry</h1>
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-amber-100 flex flex-col md:flex-row gap-4 items-end">
                     <div className="w-full">
-                        <label className="text-xs font-bold text-gray-400 uppercase">Class</label>
-                        <select onChange={(e) => handleClassSelect(e.target.value)} className="w-full p-3 bg-gray-50 border rounded-xl font-bold">
+                        <label className="text-xs font-bold text-gray-400 uppercase">1. Select Class</label>
+                        <select value={uploadClass} onChange={(e) => loadClassAndSubject(e.target.value, uploadSubject)} className="w-full p-3 bg-gray-50 border rounded-xl font-bold">
                             <option value="">-- Select Class --</option>
-                            {[
-                              "JSS 1", "JSS 2", "JSS 3", "SS 1", "SS 2", "SS 3", 
-                              "Primary 1", "Primary 2", "Primary 3", "Primary 4", "Primary 5", 
-                              "KG 1", "KG 2", "Nursery 1", "Nursery 2"
-                            ].map(c => <option key={c} value={c}>{c}</option>)}
+                            {["JSS 1", "JSS 2", "JSS 3", "SS 1", "SS 2", "SS 3", "Pry 1", "Pry 2", "Pry 3", "Pry 4", "Pry 5", "KG 1", "KG 2", "KG 3", "Creche"].map(c => <option key={c} value={c}>{c}</option>)}
                         </select>
                     </div>
                     <div className="w-full">
-                        <label className="text-xs font-bold text-gray-400 uppercase">Subject</label>
-                        <select onChange={(e) => setUploadSubject(e.target.value)} className="w-full p-3 bg-gray-50 border rounded-xl font-bold">
+                        <label className="text-xs font-bold text-gray-400 uppercase">2. Select Subject</label>
+                        <select value={uploadSubject} onChange={(e) => loadClassAndSubject(uploadClass, e.target.value)} disabled={!uploadClass} className="w-full p-3 bg-gray-50 border rounded-xl font-bold disabled:opacity-50">
                             <option value="">-- Select Subject --</option>
                             {filteredSubjects.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
                         </select>
                     </div>
                 </div>
-                {uploadStudents.length > 0 && (
+
+                {scoreEntries.length > 0 && (
                     <div className="bg-white rounded-2xl shadow-lg border border-amber-100 overflow-hidden">
+                        <div className="p-4 bg-amber-50 border-b border-amber-100 text-sm text-amber-800 font-medium flex justify-between items-center">
+                          <span><strong>Tip:</strong> Leave absent students blank. Click <strong>Save Draft</strong> if you want to finish later without sending to Admin.</span>
+                        </div>
                         <div className="overflow-x-auto">
                             <table className="w-full text-left text-sm">
-                                <thead className="bg-amber-950 text-white"><tr><th className="p-4">Student</th><th className="p-4 w-20 text-center">1st CA</th><th className="p-4 w-20 text-center">2nd CA</th><th className="p-4 w-20 text-center">Exam</th><th className="p-4 w-20 text-center">Total</th><th className="p-4 w-20 text-center">Grade</th></tr></thead>
+                                <thead className="bg-amber-950 text-white">
+                                  <tr>
+                                    <th className="p-4">Student</th>
+                                    <th className="p-4 w-20 text-center">1st CA</th>
+                                    <th className="p-4 w-20 text-center">2nd CA</th>
+                                    <th className="p-4 w-20 text-center">Exam</th>
+                                    <th className="p-4 w-20 text-center">Total</th>
+                                    <th className="p-4 w-20 text-center">Grade</th>
+                                    <th className="p-4 w-20 text-center">Status</th>
+                                  </tr>
+                                </thead>
                                 <tbody>
                                   {scoreEntries.map((entry, i) => (
-                                    <tr key={entry.student_id} className="border-b">
-                                      <td className="p-4 font-bold">{entry.student_name}</td>
-                                      <td className="p-2"><input type="number" className="w-full p-2 bg-gray-50 border rounded text-center" value={entry.ca1} onChange={e => handleScoreChange(i, 'ca1', e.target.value)}/></td>
-                                      <td className="p-2"><input type="number" className="w-full p-2 bg-gray-50 border rounded text-center" value={entry.ca2} onChange={e => handleScoreChange(i, 'ca2', e.target.value)}/></td>
-                                      <td className="p-2"><input type="number" className="w-full p-2 bg-gray-50 border rounded text-center font-bold text-blue-900" value={entry.exam} onChange={e => handleScoreChange(i, 'exam', e.target.value)}/></td>
-                                      <td className="p-4 text-center font-bold">{(Number(entry.ca1)||0)+(Number(entry.ca2)||0)+(Number(entry.exam)||0)}</td>
-                                      <td className="p-4 text-center font-bold">{entry.grade || '-'}</td>
+                                    <tr key={entry.student_id} className="border-b hover:bg-gray-50">
+                                      <td className="p-4 font-bold text-gray-800">{entry.student_name}</td>
+                                      <td className="p-2"><input type="number" disabled={entry.status === 'approved' || entry.status === 'pending'} className="w-full p-2 bg-white border border-gray-200 rounded text-center focus:ring-2 focus:ring-amber-500 outline-none disabled:bg-gray-100" value={entry.ca1} onChange={e => handleScoreChange(i, 'ca1', e.target.value)}/></td>
+                                      <td className="p-2"><input type="number" disabled={entry.status === 'approved' || entry.status === 'pending'} className="w-full p-2 bg-white border border-gray-200 rounded text-center focus:ring-2 focus:ring-amber-500 outline-none disabled:bg-gray-100" value={entry.ca2} onChange={e => handleScoreChange(i, 'ca2', e.target.value)}/></td>
+                                      <td className="p-2"><input type="number" disabled={entry.status === 'approved' || entry.status === 'pending'} className="w-full p-2 bg-white border border-gray-200 rounded text-center font-bold text-blue-900 focus:ring-2 focus:ring-amber-500 outline-none disabled:bg-gray-100" value={entry.exam} onChange={e => handleScoreChange(i, 'exam', e.target.value)}/></td>
+                                      <td className="p-4 text-center font-bold text-gray-500">{ (entry.ca1===''&&entry.ca2===''&&entry.exam==='') ? '-' : (Number(entry.ca1)||0)+(Number(entry.ca2)||0)+(Number(entry.exam)||0) }</td>
+                                      <td className="p-4 text-center font-bold text-amber-600">{entry.grade || '-'}</td>
+                                      <td className="p-4 text-center text-xs font-bold">
+                                         {entry.status === 'draft' && <span className="text-orange-500 bg-orange-50 px-2 py-1 rounded">Draft Saved</span>}
+                                         {entry.status === 'pending' && <span className="text-blue-500 bg-blue-50 px-2 py-1 rounded">Pending Admin</span>}
+                                         {entry.status === 'approved' && <span className="text-green-600 bg-green-50 px-2 py-1 rounded flex items-center gap-1"><CheckCircle size={12}/> Approved</span>}
+                                         {entry.status === 'new' && <span className="text-gray-400">-</span>}
+                                      </td>
                                     </tr>
                                   ))}
                                 </tbody>
                             </table>
                         </div>
-                        <div className="p-4 flex justify-end"><button onClick={submitScores} disabled={loading} className="px-8 py-3 bg-amber-900 text-white font-bold rounded-xl shadow hover:bg-amber-800">{loading ? 'Saving...' : 'Submit Results'}</button></div>
+                        <div className="p-6 bg-gray-50 flex justify-end gap-4 border-t">
+                            <button onClick={() => processUpload('draft')} disabled={loading} className="px-6 py-3 bg-white text-amber-900 border border-amber-900 font-bold rounded-xl shadow-sm hover:bg-amber-50 flex items-center gap-2 transition-all">
+                                <FileEdit size={18}/> {loading ? 'Saving...' : 'Save as Draft'}
+                            </button>
+                            <button onClick={() => processUpload('pending')} disabled={loading} className="px-8 py-3 bg-amber-900 text-white font-bold rounded-xl shadow-lg hover:bg-amber-800 flex items-center gap-2 transition-all">
+                                <Send size={18}/> {loading ? 'Submitting...' : 'Submit for Admin Approval'}
+                            </button>
+                        </div>
                     </div>
                 )}
              </div>
@@ -312,7 +366,7 @@ const TeacherDashboard = () => {
         </div>
       </main>
 
-      {/* MODAL */}
+      {/* REPORT MODAL */}
       {selectedStudent && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 overflow-y-auto">
             <div className="bg-white w-full max-w-2xl rounded-3xl shadow-2xl overflow-hidden my-10 animate-in zoom-in-95">
