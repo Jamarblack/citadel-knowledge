@@ -12,6 +12,19 @@ import Logo from "/school-logo.png";
 const PSYCHOMOTOR_KEYS = ["Handwriting", "Sports", "Fluency", "Drawing", "Handling Tools"];
 const AFFECTIVE_KEYS = ["Punctuality", "Neatness", "Politeness", "Honesty", "Leadership", "Attentiveness"];
 
+// --- NEW: CLASS ARMS CONFIGURATION ---
+const CLASS_ARMS: Record<string, string[]> = {
+  "KG 1": ["Gold", "Diamond", "Silver"],
+  "KG 2": ["Candy", "Chocolate", "Strawberry"],
+  "KG 3": ["Rose", "Vanilla", "Sweet"],
+  "Pry 1": ["Greatness", "Glorious", "Progress"],
+  "Pry 2": ["Mars", "Jupiter", "Venus"],
+  "Pry 3": ["Pluto", "Neptune", "Uranus"],
+  "Pry 4": ["South America", "North America", "Africa", "Europe"],
+  "Pry 5": ["Asia", "Antarctica"],
+  "Creche": [], "JSS 1": [], "JSS 2": [], "JSS 3": [], "SS 1": [], "SS 2": [], "SS 3": []
+};
+
 const TeacherDashboard = () => {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState("my_class");
@@ -24,7 +37,9 @@ const TeacherDashboard = () => {
   const [myClassStudents, setMyClassStudents] = useState<any[]>([]);
   const [selectedStudent, setSelectedStudent] = useState<any>(null);
   
-  const [uploadClass, setUploadClass] = useState("");
+  // Updated Upload States for Arms
+  const [uploadBaseClass, setUploadBaseClass] = useState("");
+  const [uploadArm, setUploadArm] = useState("");
   const [uploadSubject, setUploadSubject] = useState("");
   const [scoreEntries, setScoreEntries] = useState<any[]>([]);
   const [subjects, setSubjects] = useState<any[]>([]);
@@ -93,19 +108,17 @@ const TeacherDashboard = () => {
     }
   };
 
-  const loadClassAndSubject = async (selectedClass: string, selectedSubject: string) => {
-    setUploadClass(selectedClass);
-    setUploadSubject(selectedSubject);
-    if (!selectedClass || !selectedSubject) return;
+  const loadClassAndSubject = async (fullClassName: string, selectedSubject: string) => {
+    if (!fullClassName || !selectedSubject) return;
 
     setLoading(true);
     try {
-      const { data: students } = await supabase.from('students').select('*').eq('current_class', selectedClass).order('full_name');
+      const { data: students } = await supabase.from('students').select('*').eq('current_class', fullClassName).order('full_name');
       if (!students) return;
 
       const { data: existingResults } = await supabase.from('results')
         .select('*')
-        .eq('class_level', selectedClass)
+        .eq('class_level', fullClassName)
         .eq('subject', selectedSubject)
         .eq('term', globalSettings.term)
         .eq('session', globalSettings.session);
@@ -140,10 +153,12 @@ const TeacherDashboard = () => {
     const withTotals = newEntries.map(e => ({ ...e, total: (Number(e.ca1)||0) + (Number(e.ca2)||0) + (Number(e.exam)||0) }));
     const sorted = [...withTotals].sort((a,b) => b.total - a.total);
     
+    const currentFullClass = uploadArm ? `${uploadBaseClass} ${uploadArm}` : uploadBaseClass;
+
     setScoreEntries(withTotals.map(e => {
         const rank = sorted.findIndex(s => s.total === e.total) + 1;
         const s = ["th","st","nd","rd"], v = rank%100;
-        const { grade } = calculateGradeAndRemarks(e.total, uploadClass);
+        const { grade } = calculateGradeAndRemarks(e.total, currentFullClass);
 
         return { 
             ...e, 
@@ -154,7 +169,8 @@ const TeacherDashboard = () => {
   };
 
   const processUpload = async (targetStatus: 'draft' | 'pending') => {
-    if (!uploadSubject || !uploadClass) return toast.error("Select Class & Subject");
+    const fullClassName = uploadArm ? `${uploadBaseClass} ${uploadArm}` : uploadBaseClass;
+    if (!uploadSubject || !fullClassName) return toast.error("Select Class & Subject");
     
     const validEntries = scoreEntries.filter(e => e.ca1 !== '' || e.ca2 !== '' || e.exam !== '');
     if (validEntries.length === 0) return toast.error("No scores entered yet!");
@@ -167,14 +183,14 @@ const TeacherDashboard = () => {
     try {
         const formatted = validEntries.map(e => {
             const total = (Number(e.ca1)||0)+(Number(e.ca2)||0)+(Number(e.exam)||0);
-            const { grade, remarks } = calculateGradeAndRemarks(total, uploadClass);
+            const { grade, remarks } = calculateGradeAndRemarks(total, fullClassName);
 
             return {
                 student_id: e.student_id, 
                 student_name: e.student_name, 
                 admission_number: e.admission_number,
                 subject: uploadSubject, 
-                class_level: uploadClass, 
+                class_level: fullClassName, 
                 term: globalSettings.term, 
                 session: globalSettings.session,
                 teacher_id: teacherProfile.id, 
@@ -182,7 +198,6 @@ const TeacherDashboard = () => {
                 ca1_score: Number(e.ca1) || 0, 
                 ca2_score: Number(e.ca2) || 0, 
                 exam_score: Number(e.exam) || 0,
-                // Notice: 'total_score' has been COMPLETELY removed so Supabase can generate it itself!
                 grade: grade || 'F', 
                 position: e.position || '-', 
                 remarks: remarks || 'Fail', 
@@ -196,10 +211,10 @@ const TeacherDashboard = () => {
         
         if (targetStatus === 'draft') {
            toast.success("Draft Saved! You can come back and finish later.");
-           loadClassAndSubject(uploadClass, uploadSubject); 
+           loadClassAndSubject(fullClassName, uploadSubject); 
         } else {
            toast.success("Results Submitted to Admin for Approval!");
-           setUploadClass(""); setUploadSubject(""); setScoreEntries([]);
+           setUploadBaseClass(""); setUploadArm(""); setUploadSubject(""); setScoreEntries([]);
         }
     } catch(e:any) { 
         toast.error("Upload Failed: " + e.message); 
@@ -296,17 +311,44 @@ const TeacherDashboard = () => {
            {activeTab === 'upload' && (
              <div className="animate-in fade-in space-y-6">
                 <h1 className="text-2xl font-bold text-amber-950">Subject Score Entry</h1>
-                <div className="bg-white p-6 rounded-2xl shadow-sm border border-amber-100 flex flex-col md:flex-row gap-4 items-end">
+                
+                {/* NEW CASCADING DROPDOWNS */}
+                <div className="bg-white p-6 rounded-2xl shadow-sm border border-amber-100 grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
                     <div className="w-full">
                         <label className="text-xs font-bold text-gray-400 uppercase">1. Select Class</label>
-                        <select value={uploadClass} onChange={(e) => loadClassAndSubject(e.target.value, uploadSubject)} className="w-full p-3 bg-gray-50 border rounded-xl font-bold">
+                        <select value={uploadBaseClass} onChange={(e) => {
+                            setUploadBaseClass(e.target.value);
+                            setUploadArm(""); // Reset arm when class changes
+                            setScoreEntries([]);
+                        }} className="w-full p-3 bg-gray-50 border rounded-xl font-bold focus:ring-2 focus:ring-amber-500 outline-none">
                             <option value="">-- Select Class --</option>
-                            {["JSS 1", "JSS 2", "JSS 3", "SS 1", "SS 2", "SS 3", "Pry 1", "Pry 2", "Pry 3", "Pry 4", "Pry 5", "KG 1", "KG 2", "KG 3", "Creche"].map(c => <option key={c} value={c}>{c}</option>)}
+                            {Object.keys(CLASS_ARMS).map(c => <option key={c} value={c}>{c}</option>)}
                         </select>
                     </div>
+
+                    {/* ONLY SHOW ARM DROPDOWN IF THE CLASS HAS ARMS */}
+                    {CLASS_ARMS[uploadBaseClass]?.length > 0 ? (
+                        <div className="w-full animate-in zoom-in duration-300">
+                            <label className="text-xs font-bold text-gray-500 uppercase flex items-center gap-1">2. Select Arm <div className="w-2 h-2 rounded-full bg-gray-500 animate-pulse"></div></label>
+                            <select value={uploadArm} onChange={(e) => {
+                                setUploadArm(e.target.value);
+                                if (uploadSubject) loadClassAndSubject(`${uploadBaseClass} ${e.target.value}`, uploadSubject);
+                            }} className="w-full p-3 bg-gray-50 border border-gray-200 text-gray-900 rounded-xl font-bold focus:ring-2 focus:ring-gray-500 outline-none">
+                                <option value="">-- Select Arm --</option>
+                                {CLASS_ARMS[uploadBaseClass].map(a => <option key={a} value={a}>{a}</option>)}
+                            </select>
+                        </div>
+                    ) : (
+                        <div className="w-full hidden md:block"></div> /* Spacer if no arm */
+                    )}
+
                     <div className="w-full">
-                        <label className="text-xs font-bold text-gray-400 uppercase">2. Select Subject</label>
-                        <select value={uploadSubject} onChange={(e) => loadClassAndSubject(uploadClass, e.target.value)} disabled={!uploadClass} className="w-full p-3 bg-gray-50 border rounded-xl font-bold disabled:opacity-50">
+                        <label className="text-xs font-bold text-gray-400 uppercase">3. Select Subject</label>
+                        <select value={uploadSubject} onChange={(e) => {
+                            setUploadSubject(e.target.value);
+                            const fullClassName = uploadArm ? `${uploadBaseClass} ${uploadArm}` : uploadBaseClass;
+                            loadClassAndSubject(fullClassName, e.target.value);
+                        }} disabled={!uploadBaseClass || (CLASS_ARMS[uploadBaseClass]?.length > 0 && !uploadArm)} className="w-full p-3 bg-gray-50 border rounded-xl font-bold disabled:opacity-50 focus:ring-2 focus:ring-amber-500 outline-none">
                             <option value="">-- Select Subject --</option>
                             {filteredSubjects.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
                         </select>
