@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { 
-  LogOut, Upload, Save, BookOpen, CheckCircle, X, Menu, Camera, Send, FileEdit
+  LogOut, Upload, BookOpen, CheckCircle, X, Menu, Camera, Send, FileEdit
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
@@ -12,7 +12,7 @@ import Logo from "/school-logo.png";
 const PSYCHOMOTOR_KEYS = ["Handwriting", "Sports", "Fluency", "Drawing", "Handling Tools"];
 const AFFECTIVE_KEYS = ["Punctuality", "Neatness", "Politeness", "Honesty", "Leadership", "Attentiveness"];
 
-// --- NEW: CLASS ARMS CONFIGURATION ---
+// --- CLASS ARMS CONFIGURATION ---
 const CLASS_ARMS: Record<string, string[]> = {
   "KG 1": ["Gold", "Diamond", "Silver"],
   "KG 2": ["Candy", "Chocolate", "Strawberry"],
@@ -37,7 +37,6 @@ const TeacherDashboard = () => {
   const [myClassStudents, setMyClassStudents] = useState<any[]>([]);
   const [selectedStudent, setSelectedStudent] = useState<any>(null);
   
-  // Updated Upload States for Arms
   const [uploadBaseClass, setUploadBaseClass] = useState("");
   const [uploadArm, setUploadArm] = useState("");
   const [uploadSubject, setUploadSubject] = useState("");
@@ -46,6 +45,8 @@ const TeacherDashboard = () => {
 
   const [reportData, setReportData] = useState<any>({ attendance: { open: 110, present: 0, absent: 0 }, psychomotor: {}, affective: {}, remark: "" });
   const [studentGrades, setStudentGrades] = useState<any[]>([]);
+
+  const isSecondary = uploadBaseClass.includes("JSS") || uploadBaseClass.includes("SS");
 
   useEffect(() => {
     const id = localStorage.getItem('staffId');
@@ -73,7 +74,8 @@ const TeacherDashboard = () => {
 
   const fetchMyClass = async (className: string) => {
     const { data } = await supabase.from('students').select('*').eq('current_class', className).order('full_name');
-    if (data) setMyClassStudents(data);
+    // SAFEGUARD: Filter out any ghost uploads that have no name
+    if (data) setMyClassStudents(data.filter(s => s.full_name && s.full_name.trim() !== ""));
   };
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -91,8 +93,8 @@ const TeacherDashboard = () => {
   };
 
   const calculateGradeAndRemarks = (totalScore: number, studentClass: string) => {
-    const isSecondary = studentClass.includes("JSS") || studentClass.includes("SS");
-    if (isSecondary) {
+    const isSec = studentClass.includes("JSS") || studentClass.includes("SS");
+    if (isSec) {
       if (totalScore >= 80) return { grade: 'A', remarks: 'Excellent' };
       if (totalScore >= 70) return { grade: 'B', remarks: 'Very Good' };
       if (totalScore >= 60) return { grade: 'C', remarks: 'Good' };
@@ -123,12 +125,17 @@ const TeacherDashboard = () => {
         .eq('term', globalSettings.term)
         .eq('session', globalSettings.session);
 
-      const mergedEntries = students.map(student => {
+      // SAFEGUARD: Filter out ghost students
+      const validStudents = students.filter(s => s.full_name && s.full_name.trim() !== "");
+
+      const mergedEntries = validStudents.map(student => {
         const existing = existingResults?.find(r => r.student_id === student.id);
         return {
           student_id: student.id,
           student_name: student.full_name,
           admission_number: student.admission_number,
+          class_quiz: existing?.class_quiz !== null && existing?.class_quiz !== undefined ? existing.class_quiz : '',
+          home_quiz: existing?.home_quiz !== null && existing?.home_quiz !== undefined ? existing.home_quiz : '',
           ca1: existing?.ca1_score !== null && existing?.ca1_score !== undefined ? existing.ca1_score : '',
           ca2: existing?.ca2_score !== null && existing?.ca2_score !== undefined ? existing.ca2_score : '',
           exam: existing?.exam_score !== null && existing?.exam_score !== undefined ? existing.exam_score : '',
@@ -150,7 +157,10 @@ const TeacherDashboard = () => {
     const newEntries = [...scoreEntries]; 
     newEntries[index][field] = value;
     
-    const withTotals = newEntries.map(e => ({ ...e, total: (Number(e.ca1)||0) + (Number(e.ca2)||0) + (Number(e.exam)||0) }));
+    const withTotals = newEntries.map(e => ({ 
+        ...e, 
+        total: (Number(e.class_quiz)||0) + (Number(e.home_quiz)||0) + (Number(e.ca1)||0) + (Number(e.ca2)||0) + (Number(e.exam)||0) 
+    }));
     const sorted = [...withTotals].sort((a,b) => b.total - a.total);
     
     const currentFullClass = uploadArm ? `${uploadBaseClass} ${uploadArm}` : uploadBaseClass;
@@ -159,11 +169,12 @@ const TeacherDashboard = () => {
         const rank = sorted.findIndex(s => s.total === e.total) + 1;
         const s = ["th","st","nd","rd"], v = rank%100;
         const { grade } = calculateGradeAndRemarks(e.total, currentFullClass);
+        const hasEntry = e.class_quiz !== '' || e.home_quiz !== '' || e.ca1 !== '' || e.ca2 !== '' || e.exam !== '';
 
         return { 
             ...e, 
-            grade: (e.ca1 !== '' || e.ca2 !== '' || e.exam !== '') ? grade : '', 
-            position: (e.total > 0 && (e.ca1 !== '' || e.ca2 !== '' || e.exam !== '')) ? rank+(s[(v-20)%10]||s[v]||s[0]) : '-' 
+            grade: hasEntry ? grade : '', 
+            position: (e.total > 0 && hasEntry) ? rank+(s[(v-20)%10]||s[v]||s[0]) : '-' 
         };
     }));
   };
@@ -172,7 +183,7 @@ const TeacherDashboard = () => {
     const fullClassName = uploadArm ? `${uploadBaseClass} ${uploadArm}` : uploadBaseClass;
     if (!uploadSubject || !fullClassName) return toast.error("Select Class & Subject");
     
-    const validEntries = scoreEntries.filter(e => e.ca1 !== '' || e.ca2 !== '' || e.exam !== '');
+    const validEntries = scoreEntries.filter(e => e.class_quiz !== '' || e.home_quiz !== '' || e.ca1 !== '' || e.ca2 !== '' || e.exam !== '');
     if (validEntries.length === 0) return toast.error("No scores entered yet!");
 
     if (validEntries.some(e => e.status === 'approved')) {
@@ -182,7 +193,7 @@ const TeacherDashboard = () => {
     setLoading(true);
     try {
         const formatted = validEntries.map(e => {
-            const total = (Number(e.ca1)||0)+(Number(e.ca2)||0)+(Number(e.exam)||0);
+            const total = (Number(e.class_quiz)||0) + (Number(e.home_quiz)||0) + (Number(e.ca1)||0) + (Number(e.ca2)||0) + (Number(e.exam)||0);
             const { grade, remarks } = calculateGradeAndRemarks(total, fullClassName);
 
             return {
@@ -195,6 +206,8 @@ const TeacherDashboard = () => {
                 session: globalSettings.session,
                 teacher_id: teacherProfile.id, 
                 teacher_name: teacherProfile.full_name,
+                class_quiz: Number(e.class_quiz) || 0,
+                home_quiz: Number(e.home_quiz) || 0,
                 ca1_score: Number(e.ca1) || 0, 
                 ca2_score: Number(e.ca2) || 0, 
                 exam_score: Number(e.exam) || 0,
@@ -263,10 +276,11 @@ const TeacherDashboard = () => {
     <div className="h-full flex flex-col">
        <div className="p-8 text-center bg-amber-50/50 border-b border-amber-100">
            <div className="w-24 h-24 mx-auto rounded-full bg-amber-900 border-4 border-amber-100 relative group overflow-hidden">
-               {teacherProfile?.passport_url ? <img src={teacherProfile.passport_url} className="w-full h-full object-cover"/> : <span className="flex items-center justify-center h-full text-3xl font-bold text-white">{teacherProfile?.full_name?.[0]}</span>}
+               {/* SAFEGUARD: Optional chaining for full_name */}
+               {teacherProfile?.passport_url ? <img src={teacherProfile.passport_url} className="w-full h-full object-cover"/> : <span className="flex items-center justify-center h-full text-3xl font-bold text-white">{teacherProfile?.full_name?.[0] || 'T'}</span>}
                <label className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"><Camera className="text-white" size={24} /><input type="file" className="hidden" accept="image/*" onChange={handleFileUpload} disabled={uploading} /></label>
            </div>
-           <h3 className="font-bold text-amber-950 mt-3 truncate px-2">{teacherProfile?.full_name}</h3>
+           <h3 className="font-bold text-amber-950 mt-3 truncate px-2">{teacherProfile?.full_name || 'Staff Member'}</h3>
            <span className="text-xs font-bold text-amber-600 uppercase tracking-widest">{teacherProfile?.section} Teacher</span>
        </div>
        <nav className="flex-1 p-4 space-y-2">
@@ -299,11 +313,17 @@ const TeacherDashboard = () => {
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {myClassStudents.map(student => (
                         <div key={student.id} onClick={() => openStudentReport(student)} className="bg-white p-4 rounded-2xl border border-amber-100 shadow-sm hover:shadow-md cursor-pointer transition-all flex items-center gap-4 group">
-                            <div className="w-16 h-16 rounded-full bg-amber-50 flex items-center justify-center text-amber-800 font-bold text-xl group-hover:bg-amber-900 group-hover:text-white transition-colors">{student.full_name[0]}</div>
-                            <div><h3 className="font-bold text-gray-800">{student.full_name}</h3><p className="text-xs text-gray-400 font-mono">{student.admission_number}</p></div>
+                            {/* SAFEGUARD: Optional chaining for full_name */}
+                            <div className="w-16 h-16 rounded-full bg-amber-50 flex items-center justify-center text-amber-800 font-bold text-xl group-hover:bg-amber-900 group-hover:text-white transition-colors">{student?.full_name?.[0] || '?'}</div>
+                            <div><h3 className="font-bold text-gray-800">{student?.full_name || 'Unknown Student'}</h3><p className="text-xs text-gray-400 font-mono">{student?.admission_number || 'No ID'}</p></div>
                             <div className="ml-auto text-amber-300 group-hover:text-amber-600"><CheckCircle size={20} /></div>
                         </div>
                     ))}
+                    {myClassStudents.length === 0 && (
+                        <div className="col-span-full p-8 text-center text-gray-400 bg-white rounded-2xl border border-dashed border-gray-300">
+                            <p>No students found in your class.</p>
+                        </div>
+                    )}
                 </div>
              </div>
            )}
@@ -312,13 +332,12 @@ const TeacherDashboard = () => {
              <div className="animate-in fade-in space-y-6">
                 <h1 className="text-2xl font-bold text-amber-950">Subject Score Entry</h1>
                 
-                {/* NEW CASCADING DROPDOWNS */}
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-amber-100 grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
                     <div className="w-full">
                         <label className="text-xs font-bold text-gray-400 uppercase">1. Select Class</label>
                         <select value={uploadBaseClass} onChange={(e) => {
                             setUploadBaseClass(e.target.value);
-                            setUploadArm(""); // Reset arm when class changes
+                            setUploadArm(""); 
                             setScoreEntries([]);
                         }} className="w-full p-3 bg-gray-50 border rounded-xl font-bold focus:ring-2 focus:ring-amber-500 outline-none">
                             <option value="">-- Select Class --</option>
@@ -326,7 +345,6 @@ const TeacherDashboard = () => {
                         </select>
                     </div>
 
-                    {/* ONLY SHOW ARM DROPDOWN IF THE CLASS HAS ARMS */}
                     {CLASS_ARMS[uploadBaseClass]?.length > 0 ? (
                         <div className="w-full animate-in zoom-in duration-300">
                             <label className="text-xs font-bold text-gray-500 uppercase flex items-center gap-1">2. Select Arm <div className="w-2 h-2 rounded-full bg-gray-500 animate-pulse"></div></label>
@@ -339,7 +357,7 @@ const TeacherDashboard = () => {
                             </select>
                         </div>
                     ) : (
-                        <div className="w-full hidden md:block"></div> /* Spacer if no arm */
+                        <div className="w-full hidden md:block"></div> 
                     )}
 
                     <div className="w-full">
@@ -361,31 +379,38 @@ const TeacherDashboard = () => {
                           <span><strong>Tip:</strong> Leave absent students blank. Click <strong>Save Draft</strong> if you want to finish later without sending to Admin.</span>
                         </div>
                         <div className="overflow-x-auto">
-                            <table className="w-full text-left text-sm">
+                            <table className="w-full text-left text-sm whitespace-nowrap">
                                 <thead className="bg-amber-950 text-white">
                                   <tr>
                                     <th className="p-4">Student</th>
+                                    {!isSecondary && <th className="p-4 w-20 text-center">Class Quiz</th>}
+                                    {!isSecondary && <th className="p-4 w-20 text-center">Home Quiz</th>}
                                     <th className="p-4 w-20 text-center">1st CA</th>
                                     <th className="p-4 w-20 text-center">2nd CA</th>
                                     <th className="p-4 w-20 text-center">Exam</th>
-                                    <th className="p-4 w-20 text-center">Total</th>
+                                    <th className="p-4 w-20 text-center text-amber-300">Total</th>
                                     <th className="p-4 w-20 text-center">Grade</th>
-                                    <th className="p-4 w-20 text-center">Status</th>
+                                    <th className="p-4 w-32 text-center">Status</th>
                                   </tr>
                                 </thead>
                                 <tbody>
                                   {scoreEntries.map((entry, i) => (
                                     <tr key={entry.student_id} className="border-b hover:bg-gray-50">
-                                      <td className="p-4 font-bold text-gray-800">{entry.student_name}</td>
-                                      <td className="p-2"><input type="number" disabled={entry.status === 'approved' || entry.status === 'pending'} className="w-full p-2 bg-white border border-gray-200 rounded text-center focus:ring-2 focus:ring-amber-500 outline-none disabled:bg-gray-100" value={entry.ca1} onChange={e => handleScoreChange(i, 'ca1', e.target.value)}/></td>
-                                      <td className="p-2"><input type="number" disabled={entry.status === 'approved' || entry.status === 'pending'} className="w-full p-2 bg-white border border-gray-200 rounded text-center focus:ring-2 focus:ring-amber-500 outline-none disabled:bg-gray-100" value={entry.ca2} onChange={e => handleScoreChange(i, 'ca2', e.target.value)}/></td>
-                                      <td className="p-2"><input type="number" disabled={entry.status === 'approved' || entry.status === 'pending'} className="w-full p-2 bg-white border border-gray-200 rounded text-center font-bold text-blue-900 focus:ring-2 focus:ring-amber-500 outline-none disabled:bg-gray-100" value={entry.exam} onChange={e => handleScoreChange(i, 'exam', e.target.value)}/></td>
-                                      <td className="p-4 text-center font-bold text-gray-500">{ (entry.ca1===''&&entry.ca2===''&&entry.exam==='') ? '-' : (Number(entry.ca1)||0)+(Number(entry.ca2)||0)+(Number(entry.exam)||0) }</td>
-                                      <td className="p-4 text-center font-bold text-amber-600">{entry.grade || '-'}</td>
+                                      <td className="p-4 font-bold text-gray-800 sticky left-0 bg-white group-hover:bg-gray-50 border-r border-gray-100 drop-shadow-sm">{entry.student_name || 'Unknown Student'}</td>
+                                      
+                                      {!isSecondary && <td className="p-2 border-r border-gray-100"><input type="number" disabled={entry.status === 'approved' || entry.status === 'pending'} className="w-full p-2 bg-white border border-gray-200 rounded text-center focus:ring-2 focus:ring-amber-500 outline-none disabled:bg-gray-100" value={entry.class_quiz} onChange={e => handleScoreChange(i, 'class_quiz', e.target.value)}/></td>}
+                                      {!isSecondary && <td className="p-2 border-r border-gray-100"><input type="number" disabled={entry.status === 'approved' || entry.status === 'pending'} className="w-full p-2 bg-white border border-gray-200 rounded text-center focus:ring-2 focus:ring-amber-500 outline-none disabled:bg-gray-100" value={entry.home_quiz} onChange={e => handleScoreChange(i, 'home_quiz', e.target.value)}/></td>}
+                                      
+                                      <td className="p-2 border-r border-gray-100"><input type="number" disabled={entry.status === 'approved' || entry.status === 'pending'} className="w-full p-2 bg-white border border-gray-200 rounded text-center focus:ring-2 focus:ring-amber-500 outline-none disabled:bg-gray-100" value={entry.ca1} onChange={e => handleScoreChange(i, 'ca1', e.target.value)}/></td>
+                                      <td className="p-2 border-r border-gray-100"><input type="number" disabled={entry.status === 'approved' || entry.status === 'pending'} className="w-full p-2 bg-white border border-gray-200 rounded text-center focus:ring-2 focus:ring-amber-500 outline-none disabled:bg-gray-100" value={entry.ca2} onChange={e => handleScoreChange(i, 'ca2', e.target.value)}/></td>
+                                      <td className="p-2 border-r border-gray-100"><input type="number" disabled={entry.status === 'approved' || entry.status === 'pending'} className="w-full p-2 bg-white border border-gray-200 rounded text-center font-bold text-blue-900 focus:ring-2 focus:ring-amber-500 outline-none disabled:bg-gray-100" value={entry.exam} onChange={e => handleScoreChange(i, 'exam', e.target.value)}/></td>
+                                      
+                                      <td className="p-4 text-center font-black text-amber-900 bg-amber-50 border-r border-gray-100">{ entry.total > 0 ? entry.total : '-' }</td>
+                                      <td className="p-4 text-center font-bold text-amber-600 border-r border-gray-100">{entry.grade || '-'}</td>
                                       <td className="p-4 text-center text-xs font-bold">
-                                         {entry.status === 'draft' && <span className="text-orange-500 bg-orange-50 px-2 py-1 rounded">Draft Saved</span>}
-                                         {entry.status === 'pending' && <span className="text-blue-500 bg-blue-50 px-2 py-1 rounded">Pending Admin</span>}
-                                         {entry.status === 'approved' && <span className="text-green-600 bg-green-50 px-2 py-1 rounded flex items-center gap-1"><CheckCircle size={12}/> Approved</span>}
+                                         {entry.status === 'draft' && <span className="text-orange-500 bg-orange-50 px-2 py-1 rounded whitespace-nowrap">Draft Saved</span>}
+                                         {entry.status === 'pending' && <span className="text-blue-500 bg-blue-50 px-2 py-1 rounded whitespace-nowrap">Pending Admin</span>}
+                                         {entry.status === 'approved' && <span className="text-green-600 bg-green-50 px-2 py-1 rounded flex items-center justify-center gap-1 whitespace-nowrap"><CheckCircle size={12}/> Approved</span>}
                                          {entry.status === 'new' && <span className="text-gray-400">-</span>}
                                       </td>
                                     </tr>
