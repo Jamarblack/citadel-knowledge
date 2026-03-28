@@ -79,6 +79,28 @@ const StudentDashboard = () => {
     if (studentProfile) fetchResults(studentProfile.id, selectedTerm, selectedSession);
   };
 
+  // --- DYNAMIC GRADING SYSTEM ---
+  // This ignores the database completely and calculates the exact grade on the fly!
+  const getGradeAndRemark = (totalScore: number, studentClass: string = '') => {
+    const isSecondary = studentClass.includes("JSS") || studentClass.includes("SS");
+    
+    if (isSecondary) {
+      if (totalScore >= 80) return { grade: 'A', remark: 'Excellent' };
+      if (totalScore >= 70) return { grade: 'B', remark: 'Very Good' };
+      if (totalScore >= 60) return { grade: 'C', remark: 'Good' };
+      if (totalScore >= 50) return { grade: 'D', remark: 'Average' };
+      if (totalScore >= 45) return { grade: 'E', remark: 'Pass' };
+      return { grade: 'F', remark: 'Fail' };
+    } else {
+      // Primary Grading Scale
+      if (totalScore >= 70) return { grade: 'A', remark: 'Excellent' };
+      if (totalScore >= 60) return { grade: 'B', remark: 'Very Good' };
+      if (totalScore >= 50) return { grade: 'C', remark: 'Good' };
+      if (totalScore >= 40) return { grade: 'D', remark: 'Fair' };
+      return { grade: 'F', remark: 'Fail' };
+    }
+  };
+
   // Calculate Overall Averages based on VALID results
   const totalScore = results.reduce((acc, curr) => acc + curr.total_score, 0);
   const averageScore = results.length > 0 ? Math.round(totalScore / results.length) : 0;
@@ -240,18 +262,27 @@ const StudentDashboard = () => {
                                   </tr>
                                 </thead>
                                 <tbody>
-                                   {results.map((res, i) => (
-                                     <tr key={i} className="even:bg-gray-50 border-b border-gray-300 last:border-b-0">
-                                       <td className="p-1 sm:p-1.5 text-center border-r border-gray-300 font-bold text-gray-500">{i + 1}</td>
-                                       <td className="p-1 sm:p-1.5 font-bold text-gray-900 border-r border-gray-300 uppercase text-[9px] sm:text-[11px] md:text-sm truncate max-w-[100px] sm:max-w-[150px]">{res.subject}</td>
-                                       <td className="p-1 sm:p-1.5 text-center font-medium border-r border-gray-300">{res.ca1_score || '-'}</td>
-                                       <td className="p-1 sm:p-1.5 text-center font-medium border-r border-gray-300">{res.ca2_score || '-'}</td>
-                                       <td className="p-1 sm:p-1.5 text-center font-medium border-r border-gray-300">{res.exam_score || '-'}</td>
-                                       <td className="p-1 sm:p-1.5 text-center font-black border-r border-black bg-yellow-50">{res.total_score}</td>
-                                       <td className={`p-1 sm:p-1.5 text-center font-black border-r border-gray-300 ${res.grade === 'A' || res.grade === 'B' ? 'text-green-700' : res.grade === 'C' || res.grade === 'D' ? 'text-yellow-600' : 'text-red-600'}`}>{res.grade}</td>
-                                       <td className="p-1 sm:p-1.5 text-center text-[8px] sm:text-[10px] md:text-xs font-bold text-gray-600 uppercase tracking-wider truncate max-w-[80px] sm:max-w-[100px]">{res.remarks}</td>
-                                     </tr>
-                                   ))}
+                                   {results.map((res, i) => {
+                                     // CALCULATE GRADE & REMARK DYNAMICALLY
+                                     const { grade, remark } = getGradeAndRemark(res.total_score, studentProfile?.current_class);
+                                     
+                                     // DETERMINE GRADE COLOR
+                                     const gradeColor = (grade === 'A' || grade === 'B') ? 'text-green-700' : 
+                                                        (grade === 'C' || grade === 'D') ? 'text-yellow-600' : 'text-red-600';
+
+                                     return (
+                                       <tr key={i} className="even:bg-gray-50 border-b border-gray-300 last:border-b-0">
+                                         <td className="p-1 sm:p-1.5 text-center border-r border-gray-300 font-bold text-gray-500">{i + 1}</td>
+                                         <td className="p-1 sm:p-1.5 font-bold text-gray-900 border-r border-gray-300 uppercase text-[9px] sm:text-[11px] md:text-sm truncate max-w-[100px] sm:max-w-[150px]">{res.subject}</td>
+                                         <td className="p-1 sm:p-1.5 text-center font-medium border-r border-gray-300">{res.ca1_score || '-'}</td>
+                                         <td className="p-1 sm:p-1.5 text-center font-medium border-r border-gray-300">{res.ca2_score || '-'}</td>
+                                         <td className="p-1 sm:p-1.5 text-center font-medium border-r border-gray-300">{res.exam_score || '-'}</td>
+                                         <td className="p-1 sm:p-1.5 text-center font-black border-r border-black bg-yellow-50">{res.total_score}</td>
+                                         <td className={`p-1 sm:p-1.5 text-center font-black border-r border-gray-300 ${gradeColor}`}>{grade}</td>
+                                         <td className="p-1 sm:p-1.5 text-center text-[8px] sm:text-[10px] md:text-xs font-bold text-gray-600 uppercase tracking-wider truncate max-w-[80px] sm:max-w-[100px]">{remark}</td>
+                                       </tr>
+                                     );
+                                   })}
                                 </tbody>
                               </table>
                             </div>
