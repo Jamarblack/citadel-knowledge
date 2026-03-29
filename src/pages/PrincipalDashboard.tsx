@@ -81,7 +81,6 @@ const PrincipalDashboard = () => {
       setLoading(true);
       const { error } = await supabase.from('school_settings').update({ current_session: newGlobalSession, current_term: newGlobalTerm }).eq('id', 1);
       if (error) {
-          // If update fails because id=1 doesn't exist, insert it
           await supabase.from('school_settings').insert([{ id: 1, current_session: newGlobalSession, current_term: newGlobalTerm }]);
       }
       toast.success("Global Term & Session Updated!");
@@ -141,31 +140,34 @@ const PrincipalDashboard = () => {
   };
   
   const fetchPendingResults = async () => {
-    const { data } = await supabase.from('results').select('*').eq('status', 'pending').order('class_level');
-    if (!data) return;
-    const groups: { [key: string]: ResultBatch } = {};
-    data.forEach((row) => {
-      // Safety check for null class_level
-      if (!row.class_level || (!row.class_level.includes('SS') && !row.class_level.includes('JSS'))) return; 
-      const key = `${row.class_level}-${row.subject}`;
-      if (!groups[key]) groups[key] = { id: key, class_level: row.class_level, subject: row.subject, teacher_name: row.teacher_name || 'Unknown', student_count: 0, results: [] };
-      groups[key].results.push(row); groups[key].student_count++;
-    });
-    setPendingBatches(Object.values(groups));
+    try {
+      const { data } = await supabase.from('results').select('*').eq('status', 'pending').order('class_level');
+      if (!data) return;
+      const groups: { [key: string]: ResultBatch } = {};
+      data.forEach((row) => {
+        if (!row || !row.class_level || (!row.class_level.includes('SS') && !row.class_level.includes('JSS'))) return; 
+        
+        const key = `${row.class_level}-${row.subject}`;
+        if (!groups[key]) groups[key] = { id: key, class_level: row.class_level, subject: row.subject || 'Unknown Subject', teacher_name: row.teacher_name || 'Unknown', student_count: 0, results: [] };
+        groups[key].results.push(row); groups[key].student_count++;
+      });
+      setPendingBatches(Object.values(groups));
+    } catch (err) { console.error(err); }
   };
 
   const fetchApprovedResults = async () => {
-    const { data } = await supabase.from('results').select('*').eq('status', 'approved').order('class_level');
-    if (!data) return;
-    const groups: { [key: string]: ResultBatch } = {};
-    data.forEach((row) => {
-      // Safety check for null class_level
-      if (!row.class_level || (!row.class_level.includes('SS') && !row.class_level.includes('JSS'))) return;
-      const key = `${row.class_level}-${row.subject}`;
-      if (!groups[key]) groups[key] = { id: key, class_level: row.class_level, subject: row.subject, teacher_name: row.teacher_name || 'Unknown', student_count: 0, results: [] };
-      groups[key].results.push(row); groups[key].student_count++;
-    });
-    setApprovedBatches(Object.values(groups));
+    try {
+      const { data } = await supabase.from('results').select('*').eq('status', 'approved').order('class_level');
+      if (!data) return;
+      const groups: { [key: string]: ResultBatch } = {};
+      data.forEach((row) => {
+        if (!row || !row.class_level || (!row.class_level.includes('SS') && !row.class_level.includes('JSS'))) return;
+        const key = `${row.class_level}-${row.subject}`;
+        if (!groups[key]) groups[key] = { id: key, class_level: row.class_level, subject: row.subject || 'Unknown Subject', teacher_name: row.teacher_name || 'Unknown', student_count: 0, results: [] };
+        groups[key].results.push(row); groups[key].student_count++;
+      });
+      setApprovedBatches(Object.values(groups));
+    } catch (err) { console.error(err); }
   };
 
   const fetchBroadsheet = async () => {
@@ -184,24 +186,32 @@ const PrincipalDashboard = () => {
       const subjectsSet = new Set<string>();
 
       data.forEach(row => {
-        subjectsSet.add(row.subject);
-        if (!studentsMap[row.student_id]) {
-          studentsMap[row.student_id] = { id: row.student_id, name: row.student_name, total: 0, subjectCount: 0, scores: {} };
+        const totalScore = Number(row.total_score) || 0;
+        
+        // ULTIMATE FILTER: Only count the subject IF the total score is > 0
+        // This completely ignores ghost uploads, blanks, and nulls in the average calculation!
+        if (totalScore > 0) {
+            subjectsSet.add(row.subject);
+            if (!studentsMap[row.student_id]) {
+              studentsMap[row.student_id] = { id: row.student_id, name: row.student_name, total: 0, subjectCount: 0, scores: {} };
+            }
+            studentsMap[row.student_id].scores[row.subject] = totalScore;
+            studentsMap[row.student_id].total += totalScore;
+            studentsMap[row.student_id].subjectCount += 1; 
         }
-        studentsMap[row.student_id].scores[row.subject] = row.total_score;
-        studentsMap[row.student_id].total += row.total_score;
-        studentsMap[row.student_id].subjectCount += 1;
       });
 
       setBroadsheetSubjects(Array.from(subjectsSet));
       
-      const processedData = Object.values(studentsMap).map((s: any) => ({
+      const processedData = Object.values(studentsMap)
+        .filter((s: any) => s.subjectCount > 0) // Ensure we only map students with actual scores
+        .map((s: any) => ({
           ...s,
-          average: Number((s.total / s.subjectCount).toFixed(1))
+          average: s.subjectCount > 0 ? Number((s.total / s.subjectCount).toFixed(1)) : 0
       })).sort((a: any, b: any) => b.average - a.average);
 
       setBroadsheetData(processedData);
-      if(data.length > 0) toast.success("Broadsheet Generated!");
+      if(processedData.length > 0) toast.success("Broadsheet Generated!");
       else toast.info("No approved results found for this class yet.");
     }
     setLoadingBroadsheet(false);
@@ -216,7 +226,8 @@ const PrincipalDashboard = () => {
     broadsheetData.forEach((student, index) => {
       const row = [
         `"${student.name}"`, 
-        ...broadsheetSubjects.map(sub => student.scores[sub] || 0),
+        // Using !== undefined ensures missing subjects print as '-' 
+        ...broadsheetSubjects.map(sub => student.scores[sub] !== undefined ? student.scores[sub] : '-'),
         student.total,
         student.average,
         index + 1
@@ -372,17 +383,14 @@ const PrincipalDashboard = () => {
     <div className="min-h-screen bg-slate-50 flex font-sans">
       <SEO title="Principal Portal | Citadel" description="Academic Admin" noindex={true} />
       
-      {/* CONFIRM PENDING ACTION MODAL */}
       {confirmAction && selectedBatch && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in"><div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 animate-in zoom-in-95"><div className={`w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-4 ${confirmAction === 'approve' ? 'bg-blue-100 text-blue-600' : 'bg-red-100 text-red-600'}`}>{confirmAction === 'approve' ? <CheckCircle size={28} /> : <AlertTriangle size={28} />}</div><h3 className="text-xl font-bold text-center text-gray-900 mb-2">{confirmAction === 'approve' ? 'Approve Results?' : 'Reject Results?'}</h3><p className="text-center text-gray-500 text-sm mb-6">Are you sure you want to <strong>{confirmAction.toUpperCase()}</strong> the {selectedBatch.subject} results?</p><div className="grid grid-cols-2 gap-3"><button onClick={() => setConfirmAction(null)} className="py-3 px-4 rounded-xl border border-gray-200 font-bold text-gray-600 hover:bg-gray-50">Cancel</button><button onClick={executeBatchAction} disabled={loading} className={`py-3 px-4 rounded-xl font-bold text-white shadow-lg flex items-center justify-center gap-2 ${confirmAction === 'approve' ? 'bg-blue-600 hover:bg-blue-700' : 'bg-red-600 hover:bg-red-700'}`}>{loading ? 'Processing...' : `Yes, ${confirmAction === 'approve' ? 'Approve' : 'Reject'}`}</button></div></div></div>
       )}
 
-      {/* PENDING BATCH DETAIL MODAL */}
       {selectedBatch && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in"><div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95"><div className="bg-[#1e3a8a] p-6 text-white flex justify-between items-center shrink-0"><div><h2 className="text-xl font-bold flex items-center gap-2">{selectedBatch.class_level} - {selectedBatch.subject}</h2><p className="text-blue-200 text-sm">{selectedBatch.student_count} Students Submitted</p></div><button onClick={() => setSelectedBatch(null)} className="text-blue-200 hover:text-white"><XCircle size={28}/></button></div><div className="flex-1 overflow-y-auto p-6 bg-gray-50"><div className="bg-white border rounded-xl shadow-sm overflow-hidden"><table className="w-full text-left text-sm"><thead className="bg-gray-100 text-gray-700 font-bold border-b"><tr><th className="p-4">Student Name</th><th className="p-4 text-center">CA (40)</th><th className="p-4 text-center">Exam (60)</th><th className="p-4 text-center">Total (100)</th><th className="p-4 text-center">Grade</th></tr></thead><tbody className="divide-y">{selectedBatch.results.map((res: any) => (<tr key={res.id} className="hover:bg-blue-50/50"><td className="p-4 font-medium text-gray-900">{res.student_name}</td><td className="p-4 text-center text-gray-600">{(res.ca1_score||0) + (res.ca2_score||0)}</td><td className="p-4 text-center text-gray-600">{res.exam_score}</td><td className="p-4 text-center font-bold text-blue-900">{res.total_score}</td><td className={`p-4 text-center font-bold ${res.total_score < 40 ? 'text-red-500' : 'text-green-600'}`}>{res.grade}</td></tr>))}</tbody></table></div><div className="mt-8 flex justify-end"><div className="text-right border-t-2 border-gray-300 pt-2 px-4"><p className="text-xs text-gray-500 uppercase font-bold tracking-widest">Uploaded By</p><p className="text-lg font-serif font-bold text-[#1e3a8a]">{selectedBatch.teacher_name}</p><p className="text-xs text-gray-400 italic">Subject Teacher</p></div></div></div><div className="p-6 bg-white border-t flex justify-end gap-4 shrink-0"><button onClick={() => initiateBatchAction('reject')} disabled={loading} className="px-6 py-3 bg-red-100 text-red-700 font-bold rounded-xl hover:bg-red-200 transition-colors">Reject Batch</button><button onClick={() => initiateBatchAction('approve')} disabled={loading} className="px-6 py-3 bg-[#1e3a8a] text-white font-bold rounded-xl hover:bg-blue-900 shadow-lg transition-all flex items-center gap-2"><CheckCircle size={18}/> Approve Batch</button></div></div></div>
       )}
 
-      {/* APPROVED BATCH DETAIL MODAL */}
       {selectedApprovedBatch && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in"><div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95"><div className="bg-green-700 p-6 text-white flex justify-between items-center shrink-0"><div><h2 className="text-xl font-bold flex items-center gap-2">{selectedApprovedBatch.class_level} - {selectedApprovedBatch.subject} <span className="bg-white text-green-700 text-xs px-2 py-0.5 rounded-full font-black">APPROVED</span></h2><p className="text-green-100 text-sm">{selectedApprovedBatch.student_count} Results Managed</p></div><button onClick={() => setSelectedApprovedBatch(null)} className="text-green-100 hover:text-white"><XCircle size={28}/></button></div><div className="flex-1 overflow-y-auto p-6 bg-gray-50"><div className="bg-white border rounded-xl shadow-sm overflow-hidden"><table className="w-full text-left text-sm"><thead className="bg-gray-100 text-gray-700 font-bold border-b"><tr><th className="p-4">Student Name</th><th className="p-4 text-center">CA</th><th className="p-4 text-center">Exam</th><th className="p-4 text-center">Total</th><th className="p-4 text-center">Grade</th><th className="p-4 text-center">Action</th></tr></thead><tbody className="divide-y">{selectedApprovedBatch.results.map((res: any) => (<tr key={res.id} className="hover:bg-gray-50"><td className="p-4 font-medium text-gray-900">{res.student_name}</td><td className="p-4 text-center text-gray-600">{(res.ca1_score||0) + (res.ca2_score||0)}</td><td className="p-4 text-center text-gray-600">{res.exam_score}</td><td className="p-4 text-center font-bold text-green-700">{res.total_score}</td><td className={`p-4 text-center font-bold ${res.total_score < 40 ? 'text-red-500' : 'text-green-600'}`}>{res.grade}</td><td className="p-4 text-center"><button onClick={() => deleteSingleResult(res.id)} className="text-red-400 hover:text-red-600 hover:bg-red-50 p-2 rounded"><Trash2 size={16} /></button></td></tr>))}</tbody></table></div></div><div className="p-6 bg-red-50 border-t border-red-100 flex justify-between items-center shrink-0"><p className="text-xs text-red-400 max-w-sm">Warning: Deleting the batch removes all results permanently.</p><button onClick={() => deleteBatchResults(selectedApprovedBatch)} disabled={loading} className="px-6 py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 shadow flex items-center gap-2"><Trash2 size={18}/> Delete Entire Batch</button></div></div></div>
       )}
@@ -537,7 +545,7 @@ const PrincipalDashboard = () => {
                            <tr key={student.id} className="hover:bg-blue-50 transition-colors">
                              <td className="p-3 font-bold text-gray-900 sticky left-0 bg-white border border-gray-300 drop-shadow-[2px_0_2px_rgba(0,0,0,0.02)]">{student.name}</td>
                              {broadsheetSubjects.map(sub => (
-                               <td key={sub} className="p-3 text-gray-600 border border-gray-300 text-center font-medium">{student.scores[sub] || <span className="text-gray-300">-</span>}</td>
+                               <td key={sub} className="p-3 text-gray-600 border border-gray-300 text-center font-medium">{student.scores[sub] !== undefined ? student.scores[sub] : <span className="text-gray-300">-</span>}</td>
                              ))}
                              <td className="p-3 font-bold text-blue-900 bg-blue-50/50 border border-gray-300 text-center">{student.total}</td>
                              <td className="p-3 font-bold text-green-700 bg-green-50/50 border border-gray-300 text-center">{student.average}%</td>
@@ -613,6 +621,14 @@ const PrincipalDashboard = () => {
             </div>
           )}
 
+          {activeTab === 'updates' && (
+            <div className="space-y-6 animate-in fade-in">
+                <h1 className="text-2xl font-bold text-gray-800">Manage News & Updates</h1>
+                <div className="bg-white p-6 rounded-2xl shadow-sm border border-blue-100 flex flex-col md:flex-row gap-4 items-end"><div className="w-full"><label className="text-xs font-bold text-gray-400 uppercase">Title</label><input type="text" className="w-full p-3 bg-gray-50 border rounded-xl" placeholder="e.g. Inter-House Sports" value={newUpdate.title} onChange={e => setNewUpdate({...newUpdate, title: e.target.value})} /></div><div className="w-full md:w-48"><label className="text-xs font-bold text-gray-400 uppercase">Category</label><select className="w-full p-3 bg-gray-50 border rounded-xl" value={newUpdate.category} onChange={e => setNewUpdate({...newUpdate, category: e.target.value})}><option>Event</option><option>Holiday</option><option>Admission</option><option>News</option></select></div><div className="w-full md:w-48"><label className="text-xs font-bold text-gray-400 uppercase">Date</label><input type="date" className="w-full p-3 bg-gray-50 border rounded-xl" value={newUpdate.event_date} onChange={e => setNewUpdate({...newUpdate, event_date: e.target.value})} /></div><button onClick={postUpdate} disabled={loading} className="px-6 py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 flex items-center gap-2">{loading ? 'Posting...' : <><Plus size={18}/> Post</>}</button></div>
+                <div className="bg-white rounded-2xl shadow-sm border border-blue-100 overflow-hidden"><table className="w-full text-left text-sm"><thead className="bg-blue-50 text-blue-900 border-b border-blue-100"><tr><th className="p-4">Title</th><th className="p-4">Category</th><th className="p-4">Date</th><th className="p-4 text-right">Action</th></tr></thead><tbody className="divide-y divide-blue-50">{updates.map(update => (<tr key={update.id} className="hover:bg-blue-50/50"><td className="p-4 font-bold">{update.title}</td><td className="p-4"><span className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs font-bold">{update.category}</span></td><td className="p-4 text-gray-500">{new Date(update.event_date).toDateString()}</td><td className="p-4 text-right"><button onClick={() => deleteUpdate(update.id)} className="text-red-500 hover:bg-red-50 p-2 rounded-lg transition-colors"><Trash2 size={18}/></button></td></tr>))}{updates.length === 0 && <tr><td colSpan={4} className="p-8 text-center text-gray-400">No updates posted yet.</td></tr>}</tbody></table></div>
+            </div>
+          )}
+
           {activeTab === 'students' && (
             <div className="space-y-6 animate-in fade-in">
                <h1 className="text-2xl font-bold text-gray-800">Secondary Students Database</h1>
@@ -663,7 +679,6 @@ const PrincipalDashboard = () => {
                 <h1 className="text-2xl font-bold text-gray-800">School Configuration</h1>
                 <div className="bg-white p-8 rounded-2xl shadow-sm border border-blue-100 max-w-2xl">
                    
-                   {/* Term & Session Setting */}
                    <div className="mb-10 pb-10 border-b border-gray-100">
                      <div className="flex items-center gap-3 mb-6">
                         <div className="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center text-blue-600"><FileText size={20}/></div>
@@ -690,7 +705,6 @@ const PrincipalDashboard = () => {
                      </div>
                    </div>
 
-                   {/* Resumption Date Setting */}
                    <div className="flex items-center gap-3 mb-6"><div className="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center text-blue-600"><Calendar size={20}/></div><div><h3 className="font-bold text-gray-800">Resumption Date</h3><p className="text-xs text-gray-500">Appears on Student Report Cards.</p></div></div>
                    <div className="space-y-4"><div><label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Current Setting</label><div className="text-lg font-bold text-blue-900">{resumptionDate || 'Not Set'}</div></div><div className="pt-4 border-t border-gray-100"><label className="text-xs font-bold text-gray-500 uppercase mb-2 block">Update Date</label><div className="flex gap-4"><input type="text" placeholder="e.g. January 12th, 2026" className="flex-1 p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none" value={newResumptionDate} onChange={(e) => setNewResumptionDate(e.target.value)} /><button onClick={updateResumptionDate} disabled={loading} className="bg-blue-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-blue-700 transition-all disabled:opacity-50">{loading ? 'Saving...' : 'Save'}</button></div></div></div>
                 </div>
