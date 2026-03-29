@@ -104,12 +104,14 @@ const TeacherDashboard = () => {
     }));
   };
 
+  // THE ULTIMATE DB FIX: All blocks and locks removed! Teachers can freely edit approved results.
   const processUpload = async (targetStatus: 'draft' | 'pending') => {
     const fullClassName = uploadArm ? `${uploadBaseClass} ${uploadArm}` : uploadBaseClass;
     if (!uploadSubject || !fullClassName) return toast.error("Select Class & Subject");
     const validEntries = scoreEntries.filter(e => e.class_quiz !== '' || e.home_quiz !== '' || e.ca1 !== '' || e.ca2 !== '' || e.exam !== '');
     if (validEntries.length === 0) return toast.error("No scores entered yet!");
-    if (validEntries.some(e => e.status === 'approved')) return toast.error("Some results in this batch are already approved by the admin and cannot be edited.");
+
+    // <-- THE LOCK HAS BEEN COMPLETELY DELETED FROM HERE! -->
 
     setLoading(true);
     try {
@@ -121,19 +123,42 @@ const TeacherDashboard = () => {
                 student_id: e.student_id, student_name: e.student_name, admission_number: e.admission_number, subject: uploadSubject, class_level: fullClassName, 
                 term: globalSettings.term, session: globalSettings.session, teacher_id: teacherProfile.id, teacher_name: teacherProfile.full_name,
                 class_quiz: Number(e.class_quiz) || 0, home_quiz: Number(e.home_quiz) || 0, ca1_score: Number(e.ca1) || 0, ca2_score: Number(e.ca2) || 0, exam_score: Number(e.exam) || 0,
-                total_score: total, // THIS WAS MISSING BEFORE!
+                total_score: total, // THIS GUARANTEES THE MATH IS SAVED
                 grade: grade || 'F', position: e.position || '-', remarks: remark || 'Fail', status: targetStatus 
             };
         });
-        const { error } = await supabase.from('results').upsert(formatted, { onConflict: 'student_id, subject, term, session' });
+        
+        // Scrub the DB clean before rewriting to prevent ghosts
+        const studentIds = formatted.map(f => f.student_id);
+        await supabase.from('results').delete().eq('subject', uploadSubject).eq('term', globalSettings.term).eq('session', globalSettings.session).in('student_id', studentIds);
+
+        const { error } = await supabase.from('results').insert(formatted);
         if (error) throw error;
         
         if (targetStatus === 'draft') { toast.success("Draft Saved!"); loadClassAndSubject(fullClassName, uploadSubject); } 
-        else { toast.success("Results Submitted!"); setUploadBaseClass(""); setUploadArm(""); setUploadSubject(""); setScoreEntries([]); }
+        else { toast.success("Results Submitted to Admin!"); setUploadBaseClass(""); setUploadArm(""); setUploadSubject(""); setScoreEntries([]); }
     } catch(e:any) { toast.error("Upload Failed: " + e.message); } finally { setLoading(false); }
   };
 
-  const openStudentReport = async (student: any) => { setSelectedStudent(student); const { data: grades } = await supabase.from('results').select('subject, total_score, grade').eq('student_id', student.id).eq('term', globalSettings.term).eq('session', globalSettings.session); setStudentGrades(grades || []); const { data: existingReport } = await supabase.from('term_reports').select('*').eq('student_id', student.id).eq('term', globalSettings.term).maybeSingle(); if (existingReport) { setReportData({ attendance: { open: existingReport.days_school_open || 110, present: existingReport.days_present || 0, absent: existingReport.days_absent || 0 }, psychomotor: existingReport.psychomotor_skills || {}, affective: existingReport.affective_skills || {}, remark: existingReport.class_teacher_remark || "" }); } else { setReportData({ attendance: { open: 110, present: 0, absent: 0 }, psychomotor: {}, affective: {}, remark: "" }); } };
+  const openStudentReport = async (student: any) => { 
+      setSelectedStudent(student); 
+      const { data: rawGrades } = await supabase.from('results').select('subject, class_quiz, home_quiz, ca1_score, ca2_score, exam_score, class_level').eq('student_id', student.id).eq('term', globalSettings.term).eq('session', globalSettings.session); 
+      
+      if (rawGrades) {
+          const recalculatedGrades = rawGrades.map(g => {
+              const trueTotal = (Number(g.class_quiz)||0) + (Number(g.home_quiz)||0) + (Number(g.ca1_score)||0) + (Number(g.ca2_score)||0) + (Number(g.exam_score)||0);
+              const { grade } = calculateGradeAndRemarks(trueTotal, g.class_level || 'Pry');
+              return { subject: g.subject, total_score: trueTotal, grade: grade };
+          });
+          setStudentGrades(recalculatedGrades);
+      } else {
+          setStudentGrades([]);
+      }
+
+      const { data: existingReport } = await supabase.from('term_reports').select('*').eq('student_id', student.id).eq('term', globalSettings.term).maybeSingle(); 
+      if (existingReport) { setReportData({ attendance: { open: existingReport.days_school_open || 110, present: existingReport.days_present || 0, absent: existingReport.days_absent || 0 }, psychomotor: existingReport.psychomotor_skills || {}, affective: existingReport.affective_skills || {}, remark: existingReport.class_teacher_remark || "" }); } else { setReportData({ attendance: { open: 110, present: 0, absent: 0 }, psychomotor: {}, affective: {}, remark: "" }); } 
+  };
+  
   const saveReportDetails = async () => { if (!selectedStudent) return; setLoading(true); try { const payload = { student_id: selectedStudent.id, session: globalSettings.session, term: globalSettings.term, class_level: teacherProfile.assigned_class, days_school_open: reportData.attendance.open, days_present: reportData.attendance.present, days_absent: reportData.attendance.absent, psychomotor_skills: reportData.psychomotor, affective_skills: reportData.affective, class_teacher_remark: reportData.remark }; const { error } = await supabase.from('term_reports').upsert(payload, { onConflict: 'student_id, session, term' }); if (error) throw error; toast.success("Saved!"); setSelectedStudent(null); } catch (e: any) { toast.error(e.message); } finally { setLoading(false); } };
   const filteredSubjects = subjects.filter(sub => sub.section === 'General' || sub.section === (teacherProfile?.section || 'Secondary'));
 
@@ -160,7 +185,7 @@ const TeacherDashboard = () => {
 
                 {scoreEntries.length > 0 && (
                     <div className="bg-white rounded-2xl shadow-lg border border-amber-100 overflow-hidden">
-                        <div className="p-4 bg-amber-50 border-b border-amber-100 text-sm text-amber-800 font-medium flex justify-between items-center"> <span><strong>Tip:</strong> Leave absent students blank. Click <strong>Save Draft</strong> if you want to finish later without sending to Admin.</span> </div>
+                        <div className="p-4 bg-amber-50 border-b border-amber-100 text-sm text-amber-800 font-medium flex justify-between items-center"> <span><strong>Tip:</strong> You can edit an approved result! Just hit <strong>Submit for Admin Approval</strong> to override old results.</span> </div>
                         <div className="overflow-x-auto">
                             <table className="w-full text-left text-sm whitespace-nowrap">
                                 <thead className="bg-amber-950 text-white"> <tr> <th className="p-4">Student</th> {!isSecondary && <th className="p-4 w-20 text-center">Class Quiz</th>} {!isSecondary && <th className="p-4 w-20 text-center">Home Quiz</th>} <th className="p-4 w-20 text-center">1st CA</th> <th className="p-4 w-20 text-center">2nd CA</th> <th className="p-4 w-20 text-center">Exam</th> <th className="p-4 w-20 text-center text-amber-300">Total</th> <th className="p-4 w-20 text-center">Grade</th> <th className="p-4 w-32 text-center">Status</th> </tr> </thead>
@@ -171,11 +196,11 @@ const TeacherDashboard = () => {
                                     return (
                                       <tr key={entry.student_id} className="border-b hover:bg-gray-50">
                                         <td className="p-4 font-bold text-gray-800 sticky left-0 bg-white group-hover:bg-gray-50 border-r border-gray-100 drop-shadow-sm">{entry.student_name || 'Unknown Student'}</td>
-                                        {!isSecondary && <td className="p-2 border-r border-gray-100"><input type="number" disabled={entry.status === 'approved' || entry.status === 'pending'} className="w-full p-2 bg-white border border-gray-200 rounded text-center focus:ring-2 focus:ring-amber-500 outline-none disabled:bg-gray-100" value={entry.class_quiz} onChange={e => handleScoreChange(i, 'class_quiz', e.target.value)}/></td>}
-                                        {!isSecondary && <td className="p-2 border-r border-gray-100"><input type="number" disabled={entry.status === 'approved' || entry.status === 'pending'} className="w-full p-2 bg-white border border-gray-200 rounded text-center focus:ring-2 focus:ring-amber-500 outline-none disabled:bg-gray-100" value={entry.home_quiz} onChange={e => handleScoreChange(i, 'home_quiz', e.target.value)}/></td>}
-                                        <td className="p-2 border-r border-gray-100"><input type="number" disabled={entry.status === 'approved' || entry.status === 'pending'} className="w-full p-2 bg-white border border-gray-200 rounded text-center focus:ring-2 focus:ring-amber-500 outline-none disabled:bg-gray-100" value={entry.ca1} onChange={e => handleScoreChange(i, 'ca1', e.target.value)}/></td>
-                                        <td className="p-2 border-r border-gray-100"><input type="number" disabled={entry.status === 'approved' || entry.status === 'pending'} className="w-full p-2 bg-white border border-gray-200 rounded text-center focus:ring-2 focus:ring-amber-500 outline-none disabled:bg-gray-100" value={entry.ca2} onChange={e => handleScoreChange(i, 'ca2', e.target.value)}/></td>
-                                        <td className="p-2 border-r border-gray-100"><input type="number" disabled={entry.status === 'approved' || entry.status === 'pending'} className="w-full p-2 bg-white border border-gray-200 rounded text-center font-bold text-blue-900 focus:ring-2 focus:ring-amber-500 outline-none disabled:bg-gray-100" value={entry.exam} onChange={e => handleScoreChange(i, 'exam', e.target.value)}/></td>
+                                        {!isSecondary && <td className="p-2 border-r border-gray-100"><input type="number" className="w-full p-2 bg-white border border-gray-200 rounded text-center focus:ring-2 focus:ring-amber-500 outline-none" value={entry.class_quiz} onChange={e => handleScoreChange(i, 'class_quiz', e.target.value)}/></td>}
+                                        {!isSecondary && <td className="p-2 border-r border-gray-100"><input type="number" className="w-full p-2 bg-white border border-gray-200 rounded text-center focus:ring-2 focus:ring-amber-500 outline-none" value={entry.home_quiz} onChange={e => handleScoreChange(i, 'home_quiz', e.target.value)}/></td>}
+                                        <td className="p-2 border-r border-gray-100"><input type="number" className="w-full p-2 bg-white border border-gray-200 rounded text-center focus:ring-2 focus:ring-amber-500 outline-none" value={entry.ca1} onChange={e => handleScoreChange(i, 'ca1', e.target.value)}/></td>
+                                        <td className="p-2 border-r border-gray-100"><input type="number" className="w-full p-2 bg-white border border-gray-200 rounded text-center focus:ring-2 focus:ring-amber-500 outline-none" value={entry.ca2} onChange={e => handleScoreChange(i, 'ca2', e.target.value)}/></td>
+                                        <td className="p-2 border-r border-gray-100"><input type="number" className="w-full p-2 bg-white border border-gray-200 rounded text-center font-bold text-blue-900 focus:ring-2 focus:ring-amber-500 outline-none" value={entry.exam} onChange={e => handleScoreChange(i, 'exam', e.target.value)}/></td>
                                         <td className="p-4 text-center font-black text-amber-900 bg-amber-50 border-r border-gray-100">{ hasEntry ? currentTotal : '-' }</td>
                                         <td className="p-4 text-center font-bold text-amber-600 border-r border-gray-100">{ hasEntry ? (entry.grade || '-') : '-' }</td>
                                         <td className="p-4 text-center text-xs font-bold"> {entry.status === 'draft' && <span className="text-orange-500 bg-orange-50 px-2 py-1 rounded whitespace-nowrap">Draft Saved</span>} {entry.status === 'pending' && <span className="text-blue-500 bg-blue-50 px-2 py-1 rounded whitespace-nowrap">Pending Admin</span>} {entry.status === 'approved' && <span className="text-green-600 bg-green-50 px-2 py-1 rounded flex items-center justify-center gap-1 whitespace-nowrap"><CheckCircle size={12}/> Approved</span>} {entry.status === 'new' && <span className="text-gray-400">-</span>} </td>

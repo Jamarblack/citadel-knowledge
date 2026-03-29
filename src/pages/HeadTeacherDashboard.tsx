@@ -7,7 +7,7 @@ import { Sheet, SheetContent } from "@/components/ui/sheet";
 import SEO from "@/components/SEO";
 import logo from "/school-logo.png";
 
-type ResultBatch = { id: string; class_level: string; subject: string; teacher_name: string; student_count: number; results: any[]; };
+type ResultBatch = { id: string; term: string; session: string; class_level: string; subject: string; teacher_name: string; student_count: number; results: any[]; };
 const CLASS_ARMS: Record<string, string[]> = { "KG 1": ["Gold", "Diamond", "Silver"], "KG 2": ["Candy", "Chocolate", "Strawberry"], "KG 3": ["Rose", "Vanilla", "Sweet"], "Pry 1": ["Greatness", "Glorious", "Progress"], "Pry 2": ["Mars", "Jupiter", "Venus"], "Pry 3": ["Pluto", "Neptune", "Uranus"], "Pry 4": ["South America", "North America", "Africa", "Europe"], "Pry 5": ["Asia", "Antarctica"] };
 
 const HeadTeacherDashboard = () => {
@@ -52,7 +52,9 @@ const HeadTeacherDashboard = () => {
   const [loadingBroadsheet, setLoadingBroadsheet] = useState(false);
   const [formTeacherName, setFormTeacherName] = useState(""); 
 
-  useEffect(() => { const id = localStorage.getItem('staffId'); if (!id) navigate('/'); fetchProfile(id!); fetchStats(); fetchStudents(); fetchTeachers(); fetchPendingResults(); fetchApprovedResults(); fetchConfig(); fetchUpdates(); fetchSettings(); }, []);
+  useEffect(() => { const id = localStorage.getItem('staffId'); if (!id) navigate('/'); fetchProfile(id!); fetchStats(); fetchStudents(); fetchTeachers(); fetchConfig(); fetchUpdates(); fetchSettings(); }, []);
+  
+  useEffect(() => { if (globalSettings.term) { fetchPendingResults(); fetchApprovedResults(); } }, [globalSettings]);
 
   const fetchProfile = async (id: string) => { const { data } = await supabase.from('staff').select('*').eq('id', id).single(); if (data) setHeadProfile(data); };
   const fetchSettings = async () => { const { data } = await supabase.from('school_settings').select('*').single(); if (data) { setGlobalSettings({ session: data.current_session, term: data.current_term }); setNewGlobalSession(data.current_session); setNewGlobalTerm(data.current_term); } };
@@ -65,7 +67,6 @@ const HeadTeacherDashboard = () => {
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => { if (!event.target.files?.length || !headProfile) return; setUploading(true); try { const file = event.target.files[0]; const filePath = `staff_${headProfile.id}_${Math.random()}.${file.name.split('.').pop()}`; await supabase.storage.from('passports').upload(filePath, file); const { data: { publicUrl } } = supabase.storage.from('passports').getPublicUrl(filePath); await supabase.from('staff').update({ passport_url: publicUrl }).eq('id', headProfile.id); setHeadProfile({ ...headProfile, passport_url: publicUrl }); toast.success("Profile Photo Updated"); } catch (e: any) { toast.error("Upload failed"); } finally { setUploading(false); } };
 
-  // DYNAMIC GRADING ENGINE
   const calculateGradeAndRemarks = (totalScore: number, studentClass: string = '') => {
     const isSec = studentClass.includes("JSS") || studentClass.includes("SS");
     if (isSec) {
@@ -88,8 +89,58 @@ const HeadTeacherDashboard = () => {
   const fetchStats = async () => { const { count: sCount } = await supabase.from('students').select('*', { count: 'exact', head: true }).or('current_class.ilike.%Pry%,current_class.ilike.%KG%'); const { count: tCount } = await supabase.from('staff').select('*', { count: 'exact', head: true }).eq('role', 'Teacher').eq('section', 'Primary'); const { count: rCount } = await supabase.from('results').select('*', { count: 'exact', head: true }).eq('status', 'pending'); setStats({ students: sCount || 0, teachers: tCount || 0, pendingResults: rCount || 0 }); };
   const fetchStudents = async () => { const { data } = await supabase.from('students').select('*').or('current_class.ilike.%Pry%,current_class.ilike.%KG%').order('full_name', { ascending: true }); setStudentList(data || []); };
   const fetchTeachers = async () => { const { data } = await supabase.from('staff').select('*').eq('role', 'Teacher').eq('section', 'Primary').order('full_name', { ascending: true }); setTeacherList(data || []); };
-  const fetchPendingResults = async () => { try { const { data } = await supabase.from('results').select('*').eq('status', 'pending').order('class_level'); if (!data) return; const groups: { [key: string]: ResultBatch } = {}; data.forEach((row) => { if (!row || !row.class_level || (!row.class_level.includes('Pry') && !row.class_level.includes('KG'))) return; const key = `${row.class_level}-${row.subject}`; if (!groups[key]) groups[key] = { id: key, class_level: row.class_level, subject: row.subject || 'Unknown Subject', teacher_name: row.teacher_name || 'Unknown', student_count: 0, results: [] }; groups[key].results.push(row); groups[key].student_count++; }); setPendingBatches(Object.values(groups)); } catch (err) { console.error(err); } };
-  const fetchApprovedResults = async () => { try { const { data } = await supabase.from('results').select('*').eq('status', 'approved').order('class_level'); if (!data) return; const groups: { [key: string]: ResultBatch } = {}; data.forEach((row) => { if (!row || !row.class_level || (!row.class_level.includes('Pry') && !row.class_level.includes('KG'))) return; const key = `${row.class_level}-${row.subject}`; if (!groups[key]) groups[key] = { id: key, class_level: row.class_level, subject: row.subject || 'Unknown Subject', teacher_name: row.teacher_name || 'Unknown', student_count: 0, results: [] }; groups[key].results.push(row); groups[key].student_count++; }); setApprovedBatches(Object.values(groups)); } catch (err) { console.error(err); } };
+  
+  // PAGINATION FIX: Bypasses the 1000 row limit to find all Pending results
+  const fetchPendingResults = async () => { 
+    try { 
+        let allData: any[] = [];
+        let offset = 0;
+        let hasMore = true;
+
+        while (hasMore) {
+          const { data, error } = await supabase.from('results')
+            .select('*').eq('status', 'pending').or('class_level.ilike.%Pry%,class_level.ilike.%KG%')
+            .range(offset, offset + 999);
+          if (error) throw error;
+          if (data && data.length > 0) { allData = [...allData, ...data]; offset += 1000; if (data.length < 1000) hasMore = false; } else { hasMore = false; }
+        }
+
+        const groups: { [key: string]: ResultBatch } = {}; 
+        allData.forEach((row) => { 
+            const key = `${row.term}-${row.session}-${row.class_level}-${row.subject}`; 
+            if (!groups[key]) groups[key] = { id: key, term: row.term || 'Unknown Term', session: row.session || 'Unknown Session', class_level: row.class_level, subject: row.subject || 'Unknown Subject', teacher_name: row.teacher_name || 'Unknown', student_count: 0, results: [] }; 
+            groups[key].results.push(row); 
+            groups[key].student_count++; 
+        }); 
+        setPendingBatches(Object.values(groups)); 
+    } catch (err) { console.error(err); } 
+  };
+  
+  // PAGINATION FIX: Bypasses the 1000 row limit to find all Approved results
+  const fetchApprovedResults = async () => { 
+    try { 
+        let allData: any[] = [];
+        let offset = 0;
+        let hasMore = true;
+
+        while (hasMore) {
+          const { data, error } = await supabase.from('results')
+            .select('*').eq('status', 'approved').or('class_level.ilike.%Pry%,class_level.ilike.%KG%')
+            .range(offset, offset + 999);
+          if (error) throw error;
+          if (data && data.length > 0) { allData = [...allData, ...data]; offset += 1000; if (data.length < 1000) hasMore = false; } else { hasMore = false; }
+        }
+
+        const groups: { [key: string]: ResultBatch } = {}; 
+        allData.forEach((row) => { 
+            const key = `${row.term}-${row.session}-${row.class_level}-${row.subject}`; 
+            if (!groups[key]) groups[key] = { id: key, term: row.term || 'Unknown Term', session: row.session || 'Unknown Session', class_level: row.class_level, subject: row.subject || 'Unknown Subject', teacher_name: row.teacher_name || 'Unknown', student_count: 0, results: [] }; 
+            groups[key].results.push(row); 
+            groups[key].student_count++; 
+        }); 
+        setApprovedBatches(Object.values(groups)); 
+    } catch (err) { console.error(err); } 
+  };
 
   const fetchBroadsheet = async () => {
     const targetClass = broadsheetArm ? `${broadsheetBaseClass} ${broadsheetArm}` : broadsheetBaseClass;
@@ -97,11 +148,23 @@ const HeadTeacherDashboard = () => {
     setLoadingBroadsheet(true);
     const { data: formTeacher } = await supabase.from('staff').select('full_name').eq('assigned_class', targetClass).maybeSingle();
     setFormTeacherName(formTeacher?.full_name || 'Class Teacher');
-    const { data, error } = await supabase.from('results').select('*').eq('class_level', targetClass).eq('status', 'approved');
     
-    if (error) { toast.error("Failed to load broadsheet."); } else if (data) {
+    let allData: any[] = [];
+    let offset = 0;
+    let hasMore = true;
+
+    while (hasMore) {
+      const { data, error } = await supabase.from('results')
+        .select('*').eq('class_level', targetClass).eq('status', 'approved').eq('term', globalSettings.term).eq('session', globalSettings.session)
+        .range(offset, offset + 999);
+      if (error) { toast.error("Failed to load broadsheet."); hasMore = false; }
+      else if (data && data.length > 0) { allData = [...allData, ...data]; offset += 1000; if (data.length < 1000) hasMore = false; } 
+      else { hasMore = false; }
+    }
+
+    if (allData.length > 0) {
       const studentsMap: any = {}; const subjectsSet = new Set<string>();
-      const validData = data.filter(r => !(r.ca1_score === 0 && r.ca2_score === 0 && r.exam_score === 0 && (r.class_quiz || 0) === 0 && (r.home_quiz || 0) === 0));
+      const validData = allData.filter(r => !(r.ca1_score === 0 && r.ca2_score === 0 && r.exam_score === 0 && (r.class_quiz || 0) === 0 && (r.home_quiz || 0) === 0));
       validData.forEach(row => {
         subjectsSet.add(row.subject);
         if (!studentsMap[row.student_id]) studentsMap[row.student_id] = { id: row.student_id, name: row.student_name, total: 0, subjectCount: 0, scores: {} };
@@ -112,7 +175,7 @@ const HeadTeacherDashboard = () => {
       setBroadsheetSubjects(Array.from(subjectsSet));
       const processedData = Object.values(studentsMap).map((s: any) => ({ ...s, average: s.subjectCount > 0 ? Number((s.total / s.subjectCount).toFixed(1)) : 0 })).sort((a: any, b: any) => b.average - a.average);
       setBroadsheetData(processedData);
-      if(validData.length > 0) toast.success("Broadsheet Generated!"); else toast.info("No approved results found for this class yet.");
+      if(validData.length > 0) toast.success("Broadsheet Generated!"); else toast.info("No approved results found for this class in the current term.");
     }
     setLoadingBroadsheet(false);
   };
@@ -153,7 +216,6 @@ const HeadTeacherDashboard = () => {
 
   const initiateBatchAction = (action: 'approve' | 'reject') => setConfirmAction(action);
   
-  // THE MAGIC FIX: FORCEFUL DB UPSERT
   const executeBatchAction = async () => {
     if (!selectedBatch || !confirmAction) return; 
     setLoading(true);
@@ -161,19 +223,17 @@ const HeadTeacherDashboard = () => {
       const status = confirmAction === 'approve' ? 'approved' : 'rejected';
       
       if (status === 'approved') {
-        const formatted = selectedBatch.results.map(res => {
+        for (const res of selectedBatch.results) {
             const trueTotal = (Number(res.class_quiz) || 0) + (Number(res.home_quiz) || 0) + (Number(res.ca1_score) || 0) + (Number(res.ca2_score) || 0) + (Number(res.exam_score) || 0);
             const { grade, remark } = calculateGradeAndRemarks(trueTotal, selectedBatch.class_level);
-            return { ...res, total_score: trueTotal, grade: grade, remarks: remark, status: 'approved' };
-        });
-        
-        // This physically overwrites the wrong DB data with the newly calculated correct data!
-        const { error } = await supabase.from('results').upsert(formatted, { onConflict: 'student_id, subject, term, session' });
-        if (error) throw error;
+            // This firmly forces the database to write over any broken math
+            await supabase.from('results')
+              .update({ status: 'approved', total_score: trueTotal, grade: grade, remarks: remark })
+              .eq('id', res.id);
+        }
       } else {
         const ids = selectedBatch.results.map(r => r.id);
-        const { error } = await supabase.from('results').update({ status: status }).in('id', ids);
-        if (error) throw error;
+        await supabase.from('results').update({ status: status }).in('id', ids);
       }
 
       toast.success(`Batch ${status.toUpperCase()} successfully!`); 
@@ -198,7 +258,17 @@ const HeadTeacherDashboard = () => {
       </div>
       <nav className="flex-1 px-4 py-6 space-y-2 overflow-y-auto custom-scrollbar bg-emerald-950">
         {[
-          { id: 'overview', label: 'Overview', icon: LayoutDashboard }, { id: 'approvals', label: 'Pending Results', icon: FileCheck }, { id: 'manage-results', label: 'Approved Results', icon: Archive }, { id: 'broadsheet', label: 'Master Broadsheet', icon: FileText }, { id: 'promotions', label: 'Promote Students', icon: TrendingUp }, { id: 'reg-student', label: 'Register Student', icon: GraduationCap }, { id: 'reg-staff', label: 'Register Teacher', icon: UserPlus }, { id: 'updates', label: 'News & Events', icon: Megaphone }, { id: 'students', label: 'Primary Students', icon: Users }, { id: 'teachers', label: 'Primary Teachers', icon: GraduationCap }, { id: 'settings', label: 'Settings', icon: Settings }
+          { id: 'overview', label: 'Overview', icon: LayoutDashboard }, 
+          { id: 'approvals', label: 'Pending Results', icon: FileCheck }, 
+          { id: 'manage-results', label: 'Approved Results', icon: Archive }, 
+          { id: 'broadsheet', label: 'Master Broadsheet', icon: FileText }, 
+          { id: 'promotions', label: 'Promote Students', icon: TrendingUp }, 
+          { id: 'reg-student', label: 'Register Student', icon: GraduationCap }, 
+          { id: 'reg-staff', label: 'Register Teacher', icon: UserPlus }, 
+          { id: 'updates', label: 'News & Events', icon: Megaphone }, 
+          { id: 'students', label: 'Primary Students', icon: Users }, 
+          { id: 'teachers', label: 'Primary Teachers', icon: GraduationCap }, 
+          { id: 'settings', label: 'Settings', icon: Settings }
         ].map(item => (
           <button key={item.id} onClick={() => { setActiveTab(item.id); setIsMobileMenuOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all font-medium ${activeTab === item.id ? 'bg-emerald-600 text-white shadow-lg translate-x-1' : 'hover:bg-emerald-900 text-emerald-100/70'}`}>
             <item.icon size={20} /> {item.label}
@@ -237,8 +307,10 @@ const HeadTeacherDashboard = () => {
 
         <div className="p-6 md:p-10 max-w-7xl mx-auto">
           {activeTab === 'overview' && ( <div className="animate-in fade-in space-y-6"> <h1 className="text-2xl font-bold text-gray-800">Dashboard Overview</h1> <div className="grid grid-cols-1 md:grid-cols-3 gap-6"><div className="bg-white p-6 rounded-2xl shadow-sm border border-emerald-100"><h3 className="text-gray-500 font-bold text-sm uppercase">Students (Primary/KG)</h3><p className="text-4xl font-bold text-emerald-900 mt-2">{stats.students}</p></div><div className="bg-white p-6 rounded-2xl shadow-sm border border-emerald-100"><h3 className="text-gray-500 font-bold text-sm uppercase">Teachers (Primary)</h3><p className="text-4xl font-bold text-emerald-900 mt-2">{stats.teachers}</p></div><div className="bg-white p-6 rounded-2xl shadow-sm border border-emerald-100"><h3 className="text-gray-500 font-bold text-sm uppercase">Pending Approvals</h3><p className="text-4xl font-bold text-orange-500 mt-2">{stats.pendingResults}</p></div></div> </div> )}
-          {activeTab === 'approvals' && ( <div className="space-y-6 animate-in fade-in"> <div className="flex justify-between items-center"> <h1 className="text-2xl font-bold text-gray-800">Result Approvals</h1> <span className="bg-emerald-100 text-emerald-800 px-3 py-1 rounded-full text-xs font-bold">{pendingBatches.length} Batches Pending</span> </div> {pendingBatches.length > 0 ? ( <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"> {pendingBatches.map(batch => ( <div key={batch.id} onClick={() => setSelectedBatch(batch)} className="bg-white border border-gray-200 p-6 rounded-2xl shadow-sm hover:shadow-md hover:border-emerald-300 transition-all cursor-pointer group"> <div className="flex justify-between items-start mb-4"> <div className="w-12 h-12 rounded-xl bg-emerald-50 flex items-center justify-center text-emerald-600 group-hover:bg-emerald-600 group-hover:text-white transition-colors"><FileCheck size={24} /></div> <span className="text-xs font-bold bg-orange-100 text-orange-700 px-2 py-1 rounded">Pending</span> </div> <h3 className="text-lg font-bold text-gray-800">{batch.subject}</h3> <p className="text-sm font-medium text-gray-500 mb-4">{batch.class_level}</p> <div className="flex items-center gap-3 text-xs text-gray-400 border-t pt-4"> <User size={14} /> <span className="truncate">{batch.teacher_name}</span> <span className="ml-auto font-bold text-gray-600">{batch.student_count} Students</span> </div> </div> ))} </div> ) : ( <div className="bg-white p-12 text-center rounded-2xl border border-dashed border-gray-300 text-gray-400"> <CheckCircle size={48} className="mx-auto mb-3 opacity-20 text-emerald-500"/> <p>No pending results.</p> </div> )} </div> )}
-          {activeTab === 'manage-results' && ( <div className="space-y-6 animate-in fade-in"> <div className="flex justify-between items-center"> <div> <h1 className="text-2xl font-bold text-gray-800">Manage Approved Results</h1> <p className="text-gray-500 text-sm mt-1">View or delete results that have already been approved.</p> </div> <span className="bg-emerald-100 text-emerald-800 px-3 py-1 rounded-full text-xs font-bold">{approvedBatches.length} Batches</span> </div> {approvedBatches.length > 0 ? ( <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"> {approvedBatches.map(batch => ( <div key={batch.id} onClick={() => setSelectedApprovedBatch(batch)} className="bg-white border border-gray-200 p-6 rounded-2xl shadow-sm hover:shadow-md hover:border-emerald-300 transition-all cursor-pointer group"> <div className="flex justify-between items-start mb-4"> <div className="w-12 h-12 rounded-xl bg-emerald-50 flex items-center justify-center text-emerald-600 group-hover:bg-emerald-600 group-hover:text-white transition-colors"><FileCheck size={24} /></div> <span className="text-xs font-bold bg-emerald-100 text-emerald-700 px-2 py-1 rounded">Approved</span> </div> <h3 className="text-lg font-bold text-gray-800">{batch.subject}</h3> <p className="text-sm font-medium text-gray-500 mb-4">{batch.class_level}</p> <div className="flex items-center gap-3 text-xs text-gray-400 border-t pt-4"> <User size={14} /> <span className="truncate">{batch.teacher_name}</span> <span className="ml-auto font-bold text-gray-600">{batch.student_count} Students</span> </div> </div> ))} </div> ) : ( <div className="bg-white p-12 text-center rounded-2xl border border-dashed border-gray-300 text-gray-400"> <Archive size={48} className="mx-auto mb-3 opacity-20 text-gray-400"/> <p>No approved results to manage.</p> </div> )} </div> )}
+          
+          {activeTab === 'approvals' && ( <div className="space-y-6 animate-in fade-in"> <div className="flex justify-between items-center"> <h1 className="text-2xl font-bold text-gray-800">Result Approvals</h1> <span className="bg-emerald-100 text-emerald-800 px-3 py-1 rounded-full text-xs font-bold">{pendingBatches.length} Batches Pending</span> </div> {pendingBatches.length > 0 ? ( <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"> {pendingBatches.map(batch => ( <div key={batch.id} onClick={() => setSelectedBatch(batch)} className="bg-white border border-gray-200 p-6 rounded-2xl shadow-sm hover:shadow-md hover:border-emerald-300 transition-all cursor-pointer group"> <div className="flex justify-between items-start mb-4"> <div className="w-12 h-12 rounded-xl bg-emerald-50 flex items-center justify-center text-emerald-600 group-hover:bg-emerald-600 group-hover:text-white transition-colors"><FileCheck size={24} /></div> <span className="text-xs font-bold bg-orange-100 text-orange-700 px-2 py-1 rounded">Pending</span> </div> <h3 className="text-lg font-bold text-gray-800">{batch.subject}</h3> <p className="text-sm font-medium text-gray-500 mb-1">{batch.class_level}</p> <div className="text-[10px] bg-gray-100 text-gray-500 px-2 py-1 rounded mt-2 inline-block font-bold tracking-widest uppercase">{batch.term} • {batch.session}</div> <div className="flex items-center gap-3 text-xs text-gray-400 border-t pt-4 mt-4"> <User size={14} /> <span className="truncate">{batch.teacher_name}</span> <span className="ml-auto font-bold text-gray-600">{batch.student_count} Students</span> </div> </div> ))} </div> ) : ( <div className="bg-white p-12 text-center rounded-2xl border border-dashed border-gray-300 text-gray-400"> <CheckCircle size={48} className="mx-auto mb-3 opacity-20 text-emerald-500"/> <p>No pending results.</p> </div> )} </div> )}
+          
+          {activeTab === 'manage-results' && ( <div className="space-y-6 animate-in fade-in"> <div className="flex justify-between items-center"> <div> <h1 className="text-2xl font-bold text-gray-800">Manage Approved Results</h1> <p className="text-gray-500 text-sm mt-1">View or delete results that have already been approved.</p> </div> <span className="bg-emerald-100 text-emerald-800 px-3 py-1 rounded-full text-xs font-bold">{approvedBatches.length} Batches</span> </div> {approvedBatches.length > 0 ? ( <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"> {approvedBatches.map(batch => ( <div key={batch.id} onClick={() => setSelectedApprovedBatch(batch)} className="bg-white border border-gray-200 p-6 rounded-2xl shadow-sm hover:shadow-md hover:border-emerald-300 transition-all cursor-pointer group"> <div className="flex justify-between items-start mb-4"> <div className="w-12 h-12 rounded-xl bg-emerald-50 flex items-center justify-center text-emerald-600 group-hover:bg-emerald-600 group-hover:text-white transition-colors"><FileCheck size={24} /></div> <span className="text-xs font-bold bg-emerald-100 text-emerald-700 px-2 py-1 rounded">Approved</span> </div> <h3 className="text-lg font-bold text-gray-800">{batch.subject}</h3> <p className="text-sm font-medium text-gray-500 mb-1">{batch.class_level}</p> <div className="text-[10px] bg-gray-100 text-gray-500 px-2 py-1 rounded mt-2 inline-block font-bold tracking-widest uppercase">{batch.term} • {batch.session}</div> <div className="flex items-center gap-3 text-xs text-gray-400 border-t pt-4 mt-4"> <User size={14} /> <span className="truncate">{batch.teacher_name}</span> <span className="ml-auto font-bold text-gray-600">{batch.student_count} Students</span> </div> </div> ))} </div> ) : ( <div className="bg-white p-12 text-center rounded-2xl border border-dashed border-gray-300 text-gray-400"> <Archive size={48} className="mx-auto mb-3 opacity-20 text-gray-400"/> <p>No approved results to manage.</p> </div> )} </div> )}
 
           {activeTab === 'broadsheet' && ( <div className="space-y-6 animate-in fade-in"> <style>{`@media print { body * { visibility: hidden; } #broadsheet-print-area, #broadsheet-print-area * { visibility: visible; } #broadsheet-print-area { position: absolute; left: 0; top: 0; width: 100%; } @page { size: landscape; margin: 10mm; } * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; } .print-hide { display: none !important; } }`}</style> <div className="flex flex-col sm:flex-row sm:justify-between sm:items-end gap-4 print-hide"> <div className="space-y-1"> <h1 className="text-2xl font-bold text-gray-800">Master Broadsheet</h1> <p className="text-gray-500 text-sm">Select a class to generate the official result overview.</p> </div> {broadsheetData.length > 0 && ( <button onClick={() => window.print()} className="w-full sm:w-auto px-6 py-3 bg-emerald-800 text-white font-bold rounded-xl hover:bg-emerald-900 transition-all shadow-md flex items-center justify-center gap-2 shrink-0"> <Download size={18} /> Download PDF </button> )} </div> <div className="flex flex-col sm:flex-row gap-4 bg-white p-4 rounded-2xl shadow-sm border border-emerald-100 print-hide items-end"> <div className="w-full"> <label className="text-xs font-bold text-gray-400 uppercase">1. Select Class</label> <select value={broadsheetBaseClass} onChange={e => { setBroadsheetBaseClass(e.target.value); setBroadsheetArm(""); setBroadsheetData([]); }} className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl outline-none focus:ring-2 focus:ring-emerald-600 font-bold text-emerald-900"> <option value="">-- Select Class --</option> {Object.keys(CLASS_ARMS).map(c => <option key={c} value={c}>{c}</option>)} </select> </div> {CLASS_ARMS[broadsheetBaseClass]?.length > 0 && ( <div className="w-full"> <label className="text-xs font-bold text-emerald-600 uppercase">2. Select Arm</label> <select value={broadsheetArm} onChange={e => { setBroadsheetArm(e.target.value); setBroadsheetData([]); }} className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl outline-none focus:ring-2 focus:ring-emerald-600 font-bold text-emerald-900"> <option value="">-- Select Arm --</option> {CLASS_ARMS[broadsheetBaseClass].map(a => <option key={a} value={a}>{a}</option>)} </select> </div> )} <button onClick={fetchBroadsheet} disabled={loadingBroadsheet || !broadsheetBaseClass} className="w-full sm:w-auto px-8 py-3 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-700 transition-all shadow-md flex items-center justify-center gap-2 disabled:opacity-50"> {loadingBroadsheet ? <RefreshCw className="animate-spin" size={18}/> : <FileText size={18}/>} Preview </button> </div> {broadsheetData.length > 0 && ( <div id="broadsheet-print-area" className="bg-white p-6 md:p-10 rounded-2xl shadow-sm border border-emerald-100 relative"> <div className="text-center mb-8 border-b-2 border-emerald-800 pb-6"> <img src={logo} alt="Logo" className="w-20 h-20 mx-auto mb-3" /> <h2 className="text-2xl md:text-3xl font-black uppercase text-emerald-800 tracking-wide">Citadel of Knowledge International School</h2> <p className="text-md font-bold text-gray-500 mt-1 uppercase tracking-widest">Master Broadsheet Report</p> <div className="flex flex-wrap justify-center gap-4 md:gap-12 mt-6 text-sm font-bold text-emerald-800 bg-emerald-50 py-3 px-6 rounded-xl border border-emerald-100 w-fit mx-auto"> <span>CLASS: <span className="text-gray-700">{broadsheetArm ? `${broadsheetBaseClass} ${broadsheetArm}` : broadsheetBaseClass}</span></span> <span>TERM: <span className="text-gray-700">{globalSettings?.term}</span></span> <span>SESSION: <span className="text-gray-700">{globalSettings?.session}</span></span> </div> </div> <div className="overflow-x-auto print:overflow-visible"> <table className="w-full text-left text-sm whitespace-nowrap border-collapse border border-gray-300"> <thead className="bg-emerald-800 text-white"> <tr> <th className="p-3 border border-gray-300 sticky left-0 bg-emerald-800 z-10">Student Name</th> {broadsheetSubjects.map(sub => <th key={sub} className="p-3 border border-gray-300 text-center">{sub.substring(0, 8)}.</th>)} <th className="p-3 font-bold text-yellow-300 border border-gray-300 text-center bg-emerald-900">Total</th> <th className="p-3 font-bold text-emerald-300 border border-gray-300 text-center bg-emerald-900">Avg (%)</th> <th className="p-3 font-bold text-orange-300 border border-gray-300 text-center bg-emerald-900">Pos</th> </tr> </thead> <tbody className="divide-y divide-gray-200"> {broadsheetData.map((student, index) => ( <tr key={student.id} className="hover:bg-emerald-50 transition-colors"> <td className="p-3 font-bold text-gray-900 sticky left-0 bg-white border border-gray-300 drop-shadow-[2px_0_2px_rgba(0,0,0,0.02)]">{student.name}</td> {broadsheetSubjects.map(sub => ( <td key={sub} className="p-3 text-gray-600 border border-gray-300 text-center font-medium">{student.scores[sub] !== undefined ? student.scores[sub] : <span className="text-gray-300">-</span>}</td> ))} <td className="p-3 font-bold text-emerald-900 bg-emerald-50/50 border border-gray-300 text-center">{student.total}</td> <td className="p-3 font-bold text-emerald-700 bg-emerald-100/50 border border-gray-300 text-center">{student.average}%</td> <td className="p-3 font-bold text-orange-700 bg-orange-50/50 border border-gray-300 text-center"> {index + 1}<sup className="text-[10px] ml-0.5 text-gray-500">{index + 1 === 1 ? 'st' : index + 1 === 2 ? 'nd' : index + 1 === 3 ? 'rd' : 'th'}</sup> </td> </tr> ))} </tbody> </table> </div> <div className="mt-20 flex justify-between px-4 text-sm font-bold text-gray-800"> <div className="text-center"> <div className="w-40 md:w-56 border-b-2 border-gray-800 mb-2"></div> <p>Class Teacher's Signature</p> <p className="text-xs text-gray-500 font-medium mt-1 uppercase tracking-widest">{formTeacherName}</p> </div> <div className="text-center"> <div className="w-40 md:w-56 border-b-2 border-gray-800 mb-2"></div> <p>Head Teacher's Signature</p> <p className="text-xs text-gray-500 font-medium mt-1 uppercase tracking-widest">{headProfile?.full_name}</p> </div> </div> </div> )} </div> )}
 
