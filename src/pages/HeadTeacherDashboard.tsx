@@ -90,7 +90,7 @@ const HeadTeacherDashboard = () => {
   const fetchStudents = async () => { const { data } = await supabase.from('students').select('*').or('current_class.ilike.%Pry%,current_class.ilike.%KG%').order('full_name', { ascending: true }); setStudentList(data || []); };
   const fetchTeachers = async () => { const { data } = await supabase.from('staff').select('*').eq('role', 'Teacher').eq('section', 'Primary').order('full_name', { ascending: true }); setTeacherList(data || []); };
   
-  // PAGINATION FIX: Bypasses the 1000 row limit to find all Pending results
+  // FIX: Unlocks the 1000 row limit AND fixes the filter so you see all Primary/Basic/KG results
   const fetchPendingResults = async () => { 
     try { 
         let allData: any[] = [];
@@ -98,15 +98,16 @@ const HeadTeacherDashboard = () => {
         let hasMore = true;
 
         while (hasMore) {
-          const { data, error } = await supabase.from('results')
-            .select('*').eq('status', 'pending').or('class_level.ilike.%Pry%,class_level.ilike.%KG%')
-            .range(offset, offset + 999);
+          const { data, error } = await supabase.from('results').select('*').eq('status', 'pending').range(offset, offset + 999);
           if (error) throw error;
           if (data && data.length > 0) { allData = [...allData, ...data]; offset += 1000; if (data.length < 1000) hasMore = false; } else { hasMore = false; }
         }
 
         const groups: { [key: string]: ResultBatch } = {}; 
         allData.forEach((row) => { 
+            const cls = (row.class_level || '').toLowerCase();
+            if (!cls.includes('pry') && !cls.includes('kg') && !cls.includes('primary') && !cls.includes('basic') && !cls.includes('creche')) return;
+
             const key = `${row.term}-${row.session}-${row.class_level}-${row.subject}`; 
             if (!groups[key]) groups[key] = { id: key, term: row.term || 'Unknown Term', session: row.session || 'Unknown Session', class_level: row.class_level, subject: row.subject || 'Unknown Subject', teacher_name: row.teacher_name || 'Unknown', student_count: 0, results: [] }; 
             groups[key].results.push(row); 
@@ -116,7 +117,7 @@ const HeadTeacherDashboard = () => {
     } catch (err) { console.error(err); } 
   };
   
-  // PAGINATION FIX: Bypasses the 1000 row limit to find all Approved results
+  // FIX: Unlocks the 1000 row limit AND fixes the filter for Approved Results
   const fetchApprovedResults = async () => { 
     try { 
         let allData: any[] = [];
@@ -124,15 +125,16 @@ const HeadTeacherDashboard = () => {
         let hasMore = true;
 
         while (hasMore) {
-          const { data, error } = await supabase.from('results')
-            .select('*').eq('status', 'approved').or('class_level.ilike.%Pry%,class_level.ilike.%KG%')
-            .range(offset, offset + 999);
+          const { data, error } = await supabase.from('results').select('*').eq('status', 'approved').range(offset, offset + 999);
           if (error) throw error;
           if (data && data.length > 0) { allData = [...allData, ...data]; offset += 1000; if (data.length < 1000) hasMore = false; } else { hasMore = false; }
         }
 
         const groups: { [key: string]: ResultBatch } = {}; 
         allData.forEach((row) => { 
+            const cls = (row.class_level || '').toLowerCase();
+            if (!cls.includes('pry') && !cls.includes('kg') && !cls.includes('primary') && !cls.includes('basic') && !cls.includes('creche')) return;
+
             const key = `${row.term}-${row.session}-${row.class_level}-${row.subject}`; 
             if (!groups[key]) groups[key] = { id: key, term: row.term || 'Unknown Term', session: row.session || 'Unknown Session', class_level: row.class_level, subject: row.subject || 'Unknown Subject', teacher_name: row.teacher_name || 'Unknown', student_count: 0, results: [] }; 
             groups[key].results.push(row); 
@@ -216,6 +218,7 @@ const HeadTeacherDashboard = () => {
 
   const initiateBatchAction = (action: 'approve' | 'reject') => setConfirmAction(action);
   
+  // FIX: Removed total_score update to prevent database crash
   const executeBatchAction = async () => {
     if (!selectedBatch || !confirmAction) return; 
     setLoading(true);
@@ -226,9 +229,8 @@ const HeadTeacherDashboard = () => {
         for (const res of selectedBatch.results) {
             const trueTotal = (Number(res.class_quiz) || 0) + (Number(res.home_quiz) || 0) + (Number(res.ca1_score) || 0) + (Number(res.ca2_score) || 0) + (Number(res.exam_score) || 0);
             const { grade, remark } = calculateGradeAndRemarks(trueTotal, selectedBatch.class_level);
-            // This firmly forces the database to write over any broken math
             await supabase.from('results')
-              .update({ status: 'approved', total_score: trueTotal, grade: grade, remarks: remark })
+              .update({ status: 'approved', grade: grade, remarks: remark })
               .eq('id', res.id);
         }
       } else {
@@ -306,7 +308,7 @@ const HeadTeacherDashboard = () => {
         <header className="lg:hidden p-4 bg-white border-b flex justify-between items-center sticky top-0 z-20"><button onClick={() => setIsMobileMenuOpen(true)}><Menu className="text-emerald-900" /></button><span className="font-bold text-emerald-900 text-lg"> <img src={logo} alt="School Logo" className="w-8 h-8 inline-block mr-2" /> Head Teacher Portal</span></header>
 
         <div className="p-6 md:p-10 max-w-7xl mx-auto">
-          {activeTab === 'overview' && ( <div className="animate-in fade-in space-y-6"> <h1 className="text-2xl font-bold text-gray-800">Dashboard Overview</h1> <div className="grid grid-cols-1 md:grid-cols-3 gap-6"><div className="bg-white p-6 rounded-2xl shadow-sm border border-emerald-100"><h3 className="text-gray-500 font-bold text-sm uppercase">Students (Primary/KG)</h3><p className="text-4xl font-bold text-emerald-900 mt-2">{stats.students}</p></div><div className="bg-white p-6 rounded-2xl shadow-sm border border-emerald-100"><h3 className="text-gray-500 font-bold text-sm uppercase">Teachers (Primary)</h3><p className="text-4xl font-bold text-emerald-900 mt-2">{stats.teachers}</p></div><div className="bg-white p-6 rounded-2xl shadow-sm border border-emerald-100"><h3 className="text-gray-500 font-bold text-sm uppercase">Pending Approvals</h3><p className="text-4xl font-bold text-orange-500 mt-2">{stats.pendingResults}</p></div></div> </div> )}
+          {activeTab === 'overview' && ( <div className="animate-in fade-in space-y-6"> <div className="flex justify-between items-center"><h1 className="text-2xl font-bold text-gray-800">Dashboard Overview</h1><button onClick={() => {fetchPendingResults(); fetchApprovedResults(); toast.info("Data refreshed");}} className="bg-emerald-100 text-emerald-700 p-2 rounded hover:bg-emerald-200 transition-colors flex items-center gap-2 text-sm font-bold"><RefreshCw size={16} /> Refresh</button></div> <div className="grid grid-cols-1 md:grid-cols-3 gap-6"><div className="bg-white p-6 rounded-2xl shadow-sm border border-emerald-100"><h3 className="text-gray-500 font-bold text-sm uppercase">Students (Primary/KG)</h3><p className="text-4xl font-bold text-emerald-900 mt-2">{stats.students}</p></div><div className="bg-white p-6 rounded-2xl shadow-sm border border-emerald-100"><h3 className="text-gray-500 font-bold text-sm uppercase">Teachers (Primary)</h3><p className="text-4xl font-bold text-emerald-900 mt-2">{stats.teachers}</p></div><div className="bg-white p-6 rounded-2xl shadow-sm border border-emerald-100"><h3 className="text-gray-500 font-bold text-sm uppercase">Pending Approvals</h3><p className="text-4xl font-bold text-orange-500 mt-2">{stats.pendingResults}</p></div></div> </div> )}
           
           {activeTab === 'approvals' && ( <div className="space-y-6 animate-in fade-in"> <div className="flex justify-between items-center"> <h1 className="text-2xl font-bold text-gray-800">Result Approvals</h1> <span className="bg-emerald-100 text-emerald-800 px-3 py-1 rounded-full text-xs font-bold">{pendingBatches.length} Batches Pending</span> </div> {pendingBatches.length > 0 ? ( <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"> {pendingBatches.map(batch => ( <div key={batch.id} onClick={() => setSelectedBatch(batch)} className="bg-white border border-gray-200 p-6 rounded-2xl shadow-sm hover:shadow-md hover:border-emerald-300 transition-all cursor-pointer group"> <div className="flex justify-between items-start mb-4"> <div className="w-12 h-12 rounded-xl bg-emerald-50 flex items-center justify-center text-emerald-600 group-hover:bg-emerald-600 group-hover:text-white transition-colors"><FileCheck size={24} /></div> <span className="text-xs font-bold bg-orange-100 text-orange-700 px-2 py-1 rounded">Pending</span> </div> <h3 className="text-lg font-bold text-gray-800">{batch.subject}</h3> <p className="text-sm font-medium text-gray-500 mb-1">{batch.class_level}</p> <div className="text-[10px] bg-gray-100 text-gray-500 px-2 py-1 rounded mt-2 inline-block font-bold tracking-widest uppercase">{batch.term} • {batch.session}</div> <div className="flex items-center gap-3 text-xs text-gray-400 border-t pt-4 mt-4"> <User size={14} /> <span className="truncate">{batch.teacher_name}</span> <span className="ml-auto font-bold text-gray-600">{batch.student_count} Students</span> </div> </div> ))} </div> ) : ( <div className="bg-white p-12 text-center rounded-2xl border border-dashed border-gray-300 text-gray-400"> <CheckCircle size={48} className="mx-auto mb-3 opacity-20 text-emerald-500"/> <p>No pending results.</p> </div> )} </div> )}
           

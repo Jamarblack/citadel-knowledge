@@ -104,14 +104,11 @@ const TeacherDashboard = () => {
     }));
   };
 
-  // THE ULTIMATE DB FIX: All blocks and locks removed! Teachers can freely edit approved results.
   const processUpload = async (targetStatus: 'draft' | 'pending') => {
     const fullClassName = uploadArm ? `${uploadBaseClass} ${uploadArm}` : uploadBaseClass;
     if (!uploadSubject || !fullClassName) return toast.error("Select Class & Subject");
     const validEntries = scoreEntries.filter(e => e.class_quiz !== '' || e.home_quiz !== '' || e.ca1 !== '' || e.ca2 !== '' || e.exam !== '');
     if (validEntries.length === 0) return toast.error("No scores entered yet!");
-
-    // <-- THE LOCK HAS BEEN COMPLETELY DELETED FROM HERE! -->
 
     setLoading(true);
     try {
@@ -123,12 +120,11 @@ const TeacherDashboard = () => {
                 student_id: e.student_id, student_name: e.student_name, admission_number: e.admission_number, subject: uploadSubject, class_level: fullClassName, 
                 term: globalSettings.term, session: globalSettings.session, teacher_id: teacherProfile.id, teacher_name: teacherProfile.full_name,
                 class_quiz: Number(e.class_quiz) || 0, home_quiz: Number(e.home_quiz) || 0, ca1_score: Number(e.ca1) || 0, ca2_score: Number(e.ca2) || 0, exam_score: Number(e.exam) || 0,
-                total_score: total, // THIS GUARANTEES THE MATH IS SAVED
+                // REMOVED total_score - The DB will auto-calculate it now!
                 grade: grade || 'F', position: e.position || '-', remarks: remark || 'Fail', status: targetStatus 
             };
         });
         
-        // Scrub the DB clean before rewriting to prevent ghosts
         const studentIds = formatted.map(f => f.student_id);
         await supabase.from('results').delete().eq('subject', uploadSubject).eq('term', globalSettings.term).eq('session', globalSettings.session).in('student_id', studentIds);
 
