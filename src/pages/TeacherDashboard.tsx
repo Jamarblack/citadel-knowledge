@@ -37,26 +37,24 @@ const TeacherDashboard = () => {
   const fetchProfile = async (id: string) => { const { data } = await supabase.from('staff').select('*').eq('id', id).single(); if (data) { setTeacherProfile(data); if (data.assigned_class) fetchMyClass(data.assigned_class); } };
   const fetchSubjects = async () => { const { data } = await supabase.from('subjects').select('*').order('name'); if (data) setSubjects(data); };
   const fetchMyClass = async (className: string) => { const { data } = await supabase.from('students').select('*').eq('current_class', className).order('full_name'); if (data) setMyClassStudents(data.filter(s => s.full_name && s.full_name.trim() !== "")); };
-
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => { if (!event.target.files?.length || !teacherProfile) return; setUploading(true); try { const file = event.target.files[0]; const filePath = `staff_${teacherProfile.id}_${Math.random()}.${file.name.split('.').pop()}`; await supabase.storage.from('passports').upload(filePath, file); const { data: { publicUrl } } = supabase.storage.from('passports').getPublicUrl(filePath); await supabase.from('staff').update({ passport_url: publicUrl }).eq('id', teacherProfile.id); setTeacherProfile({ ...teacherProfile, passport_url: publicUrl }); toast.success("Profile Photo Updated"); } catch (e: any) { toast.error("Upload failed"); } finally { setUploading(false); } };
 
-  // DYNAMIC GRADING ENGINE (Exact Math)
   const calculateGradeAndRemarks = (totalScore: number, studentClass: string) => {
     const isSec = studentClass.includes("JSS") || studentClass.includes("SS");
     if (isSec) {
-      if (totalScore >= 80) return { grade: 'A', remarks: 'Excellent' };
-      if (totalScore >= 70) return { grade: 'B', remarks: 'Very Good' };
-      if (totalScore >= 60) return { grade: 'C', remarks: 'Good' };
-      if (totalScore >= 50) return { grade: 'D', remarks: 'Average' };
-      if (totalScore >= 45) return { grade: 'E', remarks: 'Pass' };
-      return { grade: 'F', remarks: 'Fail' };
+      if (totalScore >= 80) return { grade: 'A', remark: 'Excellent' };
+      if (totalScore >= 70) return { grade: 'B', remark: 'Very Good' };
+      if (totalScore >= 60) return { grade: 'C', remark: 'Good' };
+      if (totalScore >= 50) return { grade: 'D', remark: 'Average' };
+      if (totalScore >= 45) return { grade: 'E', remark: 'Pass' };
+      return { grade: 'F', remark: 'Fail' };
     } else {
-      if (totalScore >= 80) return { grade: 'A', remarks: 'Excellent' };
-      if (totalScore >= 70) return { grade: 'B', remarks: 'V.Good' };
-      if (totalScore >= 60) return { grade: 'C', remarks: 'Good' };
-      if (totalScore >= 50) return { grade: 'D', remarks: 'Average' };
-      if (totalScore >= 40) return { grade: 'E', remarks: 'Fair' };
-      return { grade: 'F', remarks: 'Fail' };
+      if (totalScore >= 80) return { grade: 'A', remark: 'Excellent' };
+      if (totalScore >= 70) return { grade: 'B', remark: 'V.Good' };
+      if (totalScore >= 60) return { grade: 'C', remark: 'Good' };
+      if (totalScore >= 50) return { grade: 'D', remark: 'Average' };
+      if (totalScore >= 40) return { grade: 'E', remark: 'Fair' };
+      return { grade: 'F', remark: 'Fail' };
     }
   };
 
@@ -83,7 +81,6 @@ const TeacherDashboard = () => {
         return {
           student_id: student.id, student_name: student.full_name, admission_number: student.admission_number,
           class_quiz: cq, home_quiz: hq, ca1: ca1, ca2: ca2, exam: exam, total: total,
-          // Calculate grade on the fly immediately so it overrides any old bad grades saved in DB
           grade: hasEntry ? calculateGradeAndRemarks(total, fullClassName).grade : '',
           status: existing?.status || 'new', position: existing?.position || '-'
         };
@@ -118,13 +115,14 @@ const TeacherDashboard = () => {
     try {
         const formatted = validEntries.map(e => {
             const total = (Number(e.class_quiz)||0) + (Number(e.home_quiz)||0) + (Number(e.ca1)||0) + (Number(e.ca2)||0) + (Number(e.exam)||0);
-            const { grade, remarks } = calculateGradeAndRemarks(total, fullClassName);
+            const { grade, remark } = calculateGradeAndRemarks(total, fullClassName);
 
             return {
                 student_id: e.student_id, student_name: e.student_name, admission_number: e.admission_number, subject: uploadSubject, class_level: fullClassName, 
                 term: globalSettings.term, session: globalSettings.session, teacher_id: teacherProfile.id, teacher_name: teacherProfile.full_name,
                 class_quiz: Number(e.class_quiz) || 0, home_quiz: Number(e.home_quiz) || 0, ca1_score: Number(e.ca1) || 0, ca2_score: Number(e.ca2) || 0, exam_score: Number(e.exam) || 0,
-                grade: grade || 'F', position: e.position || '-', remarks: remarks || 'Fail', status: targetStatus 
+                total_score: total, // THIS WAS MISSING BEFORE!
+                grade: grade || 'F', position: e.position || '-', remarks: remark || 'Fail', status: targetStatus 
             };
         });
         const { error } = await supabase.from('results').upsert(formatted, { onConflict: 'student_id, subject, term, session' });
