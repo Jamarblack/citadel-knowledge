@@ -9,6 +9,12 @@ import logo from "/school-logo.png";
 const PSYCHOMOTOR_KEYS = ["Handwriting", "Sports", "Fluency", "Drawing", "Handling Tools"];
 const AFFECTIVE_KEYS = ["Punctuality", "Neatness", "Politeness", "Honesty", "Leadership", "Attentiveness"];
 
+const getOrdinal = (n: number) => {
+  const s = ["th", "st", "nd", "rd"];
+  const v = n % 100;
+  return s[(v - 20) % 10] || s[v] || s[0];
+};
+
 const StudentDashboard = () => {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState("result");
@@ -20,22 +26,58 @@ const StudentDashboard = () => {
   const [results, setResults] = useState<any[]>([]);
   const [reportDetails, setReportDetails] = useState<any>(null);
   const [nextTermBegins, setNextTermBegins] = useState("");
+  const [classPosition, setClassPosition] = useState({ rank: 0, outOf: 0 });
+
   const isSecondary = studentProfile?.current_class?.includes("JSS") || studentProfile?.current_class?.includes("SS");
 
   useEffect(() => { const id = localStorage.getItem('studentId'); if (!id) navigate('/'); fetchInitialData(id!); }, []);
-  const fetchInitialData = async (id: string) => { const { data: settings } = await supabase.from('school_settings').select('*').single(); let currentSession = "2025/2026"; let currentTerm = "2nd Term"; if (settings) { currentSession = settings.current_session; currentTerm = settings.current_term; setSelectedSession(currentSession); setSelectedTerm(currentTerm); } const { data: config } = await supabase.from('school_config').select('*').limit(1).maybeSingle(); if (config) setNextTermBegins(config.next_term_begins); const { data: profile } = await supabase.from('students').select('*').eq('id', id).single(); if (profile) { setStudentProfile(profile); fetchResults(profile.id, currentTerm, currentSession); } };
 
-  const fetchResults = async (studentId: string, term: string, session: string) => {
+  const fetchInitialData = async (id: string) => { 
+    const { data: settings } = await supabase.from('school_settings').select('*').single(); 
+    let currentSession = "2025/2026"; let currentTerm = "2nd Term"; 
+    if (settings) { currentSession = settings.current_session; currentTerm = settings.current_term; setSelectedSession(currentSession); setSelectedTerm(currentTerm); } 
+    const { data: config } = await supabase.from('school_config').select('*').limit(1).maybeSingle(); 
+    if (config) setNextTermBegins(config.next_term_begins); 
+    const { data: profile } = await supabase.from('students').select('*').eq('id', id).single(); 
+    if (profile) { setStudentProfile(profile); fetchResults(profile.id, currentTerm, currentSession, profile.current_class); } 
+  };
+
+  const fetchResults = async (studentId: string, term: string, session: string, studentClass: string) => {
     setLoading(true);
+    // Fetch individual results
     const { data: resData } = await supabase.from('results').select('*').eq('student_id', studentId).eq('term', term).eq('session', session).eq('status', 'approved');
     const validResults = (resData || []).filter(r => !(r.ca1_score === 0 && r.ca2_score === 0 && r.exam_score === 0 && r.class_quiz === 0 && r.home_quiz === 0));
     setResults(validResults);
+    
+    // Fetch report details
     const { data: repData } = await supabase.from('term_reports').select('*').eq('student_id', studentId).eq('term', term).eq('session', session).maybeSingle();
     setReportDetails(repData);
+
+    // FETCH ALL CLASS RESULTS TO CALCULATE EXACT OVERALL POSITION
+    if (studentClass) {
+       const { data: allClassData } = await supabase.from('results').select('student_id, total_score')
+         .eq('class_level', studentClass).eq('term', term).eq('session', session).eq('status', 'approved');
+       
+       if (allClassData) {
+         const studentStats: Record<string, { total: number, count: number }> = {};
+         allClassData.forEach(r => {
+            if ((r.total_score || 0) > 0) { // Strict filter for valid subjects only
+                if (!studentStats[r.student_id]) studentStats[r.student_id] = { total: 0, count: 0 };
+                studentStats[r.student_id].total += r.total_score;
+                studentStats[r.student_id].count += 1;
+            }
+         });
+         const ranked = Object.entries(studentStats).map(([id, stats]) => ({
+             id, avg: stats.count > 0 ? Number((stats.total / stats.count).toFixed(1)) : 0
+         })).sort((a, b) => b.avg - a.avg);
+         
+         const myRankIndex = ranked.findIndex(r => r.id === studentId);
+         setClassPosition({ rank: myRankIndex !== -1 ? myRankIndex + 1 : 0, outOf: ranked.length });
+       }
+    }
     setLoading(false);
   };
 
-  // THE ULTIMATE GRADING ENGINE
   const getGradeAndRemark = (totalScore: number, studentClass: string = '') => {
     const isSec = studentClass.includes("JSS") || studentClass.includes("SS");
     if (isSec) {
@@ -46,7 +88,6 @@ const StudentDashboard = () => {
       if (totalScore >= 45) return { grade: 'E', remark: 'Pass' };
       return { grade: 'F', remark: 'Fail' };
     } else {
-      // NEW PRIMARY EXACT SCALE
       if (totalScore >= 80) return { grade: 'A', remark: 'Excellent' };
       if (totalScore >= 70) return { grade: 'B', remark: 'V.Good' };
       if (totalScore >= 60) return { grade: 'C', remark: 'Good' };
@@ -73,7 +114,7 @@ const StudentDashboard = () => {
            {activeTab === 'result' && (
              <div className="animate-in fade-in space-y-6">
                 <div className="flex flex-col md:flex-row justify-between md:items-end gap-4 print-hide"> <div> <h1 className="text-3xl md:text-4xl font-black text-gray-900 tracking-tight">Result Checker</h1> <p className="text-gray-500 font-medium mt-1">View and print your official termly report card.</p> </div> </div>
-                <div className="bg-white p-4 md:p-6 rounded-2xl shadow-sm border-l-4 border-[#FFD700] flex flex-col md:flex-row gap-4 items-end print-hide"> <div className="w-full md:flex-1"><label className="text-xs font-black text-gray-400 uppercase tracking-widest mb-2 block">Session</label><select value={selectedSession} onChange={(e) => setSelectedSession(e.target.value)} className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl font-bold text-gray-900 outline-none"><option>2025/2026</option><option>2024/2025</option></select></div> <div className="w-full md:flex-1"><label className="text-xs font-black text-gray-400 uppercase tracking-widest mb-2 block">Term</label><select value={selectedTerm} onChange={(e) => setSelectedTerm(e.target.value)} className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl font-bold text-gray-900 outline-none"><option>1st Term</option><option>2nd Term</option><option>3rd Term</option></select></div> <button onClick={() => fetchResults(studentProfile.id, selectedTerm, selectedSession)} disabled={loading} className="w-full md:w-auto px-8 py-3 bg-red-600 text-white font-black rounded-xl shadow-lg hover:bg-red-700 transition-all uppercase tracking-wider">{loading ? 'Checking...' : 'Check Result'}</button> </div>
+                <div className="bg-white p-4 md:p-6 rounded-2xl shadow-sm border-l-4 border-[#FFD700] flex flex-col md:flex-row gap-4 items-end print-hide"> <div className="w-full md:flex-1"><label className="text-xs font-black text-gray-400 uppercase tracking-widest mb-2 block">Session</label><select value={selectedSession} onChange={(e) => setSelectedSession(e.target.value)} className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl font-bold text-gray-900 outline-none"><option>2025/2026</option><option>2024/2025</option></select></div> <div className="w-full md:flex-1"><label className="text-xs font-black text-gray-400 uppercase tracking-widest mb-2 block">Term</label><select value={selectedTerm} onChange={(e) => setSelectedTerm(e.target.value)} className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl font-bold text-gray-900 outline-none"><option>1st Term</option><option>2nd Term</option><option>3rd Term</option></select></div> <button onClick={() => fetchResults(studentProfile.id, selectedTerm, selectedSession, studentProfile.current_class)} disabled={loading} className="w-full md:w-auto px-8 py-3 bg-red-600 text-white font-black rounded-xl shadow-lg hover:bg-red-700 transition-all uppercase tracking-wider">{loading ? 'Checking...' : 'Check Result'}</button> </div>
 
                 {results.length > 0 && (
                   <div className="space-y-4">
@@ -110,7 +151,21 @@ const StudentDashboard = () => {
                                 </tbody>
                               </table>
                             </div>
-                            <div className="flex flex-col md:flex-row gap-4 mb-4 page-break-avoid text-xs md:text-sm"> <div className="flex-1 space-y-4"> <div className="border-2 border-black flex"><div className="bg-red-700 text-white font-bold p-2 w-1/2 flex items-center uppercase text-[10px] sm:text-xs">Total Score</div><div className="p-2 font-black text-center flex-1">{totalScore}</div></div> <div className="border-2 border-black flex"><div className="bg-red-700 text-white font-bold p-2 w-1/2 flex items-center uppercase text-[10px] sm:text-xs">Overall Average</div><div className="p-2 font-black text-center flex-1 text-red-600 text-base sm:text-lg">{averageScore}%</div></div> <div className="border-2 border-black"><div className="bg-gray-200 text-black font-bold p-1 text-center border-b-2 border-black uppercase text-[10px] sm:text-xs">Attendance</div><div className="p-2 space-y-1 text-[10px] sm:text-xs"><div className="flex justify-between font-medium"><span>Days School Opened:</span> <span className="font-bold">{reportDetails?.days_school_open || '-'}</span></div><div className="flex justify-between font-medium"><span>Days Present:</span> <span className="font-bold">{reportDetails?.days_present || '-'}</span></div><div className="flex justify-between font-medium"><span>Days Absent:</span> <span className="font-bold">{reportDetails?.days_absent || '-'}</span></div></div></div> </div> <div className="flex-1 border-2 border-black"><div className="bg-gray-200 text-black font-bold p-1 text-center border-b-2 border-black uppercase text-[9px] sm:text-[10px] md:text-xs tracking-wider">Psychomotor Domain</div><div className="p-1">{PSYCHOMOTOR_KEYS.map(k => (<div key={k} className="flex justify-between text-[9px] sm:text-[11px] md:text-xs border-b border-gray-200 last:border-0 px-1 py-0.5"><span className="uppercase text-gray-700">{k}</span> <span className="font-black">{reportDetails?.psychomotor_skills?.[k] || '-'}</span></div>))}</div><div className="p-1 text-[8px] sm:text-[9px] text-center border-t border-gray-300 text-gray-500 mt-1">Scale: 5-Excellent, 4-Very Good, 3-Good, 2-Fair, 1-Poor</div></div> <div className="flex-1 border-2 border-black"><div className="bg-gray-200 text-black font-bold p-1 text-center border-b-2 border-black uppercase text-[9px] sm:text-[10px] md:text-xs tracking-wider">Affective Domain</div><div className="p-1">{AFFECTIVE_KEYS.map(k => (<div key={k} className="flex justify-between text-[9px] sm:text-[11px] md:text-xs border-b border-gray-200 last:border-0 px-1 py-0.5"><span className="uppercase text-gray-700">{k}</span> <span className="font-black">{reportDetails?.affective_skills?.[k] || '-'}</span></div>))}</div></div> </div>
+                            
+                            {/* OVERALL POSITION AND AVERAGE */}
+                            <div className="flex flex-col md:flex-row gap-4 mb-4 page-break-avoid text-xs md:text-sm"> 
+                               <div className="flex-1 space-y-4"> 
+                                  <div className="border-2 border-black flex"><div className="bg-red-700 text-white font-bold p-2 w-1/2 flex items-center uppercase text-[10px] sm:text-xs">Total Score</div><div className="p-2 font-black text-center flex-1">{totalScore}</div></div> 
+                                  <div className="border-2 border-black flex"><div className="bg-red-700 text-white font-bold p-2 w-1/2 flex items-center uppercase text-[10px] sm:text-xs">Overall Average</div><div className="p-2 font-black text-center flex-1 text-red-600 text-base sm:text-lg">{averageScore}%</div></div> 
+                                  
+                                  {/* NEW POSITION ELEMENT */}
+                                  <div className="border-2 border-black flex"><div className="bg-red-700 text-white font-bold p-2 w-1/2 flex items-center uppercase text-[10px] sm:text-xs">Position</div><div className="p-2 font-black text-center flex-1 text-blue-800 text-base sm:text-lg">{classPosition.rank ? `${classPosition.rank}${getOrdinal(classPosition.rank)} out of ${classPosition.outOf}` : '-'}</div></div> 
+                                  
+                                  <div className="border-2 border-black"><div className="bg-gray-200 text-black font-bold p-1 text-center border-b-2 border-black uppercase text-[10px] sm:text-xs">Attendance</div><div className="p-2 space-y-1 text-[10px] sm:text-xs"><div className="flex justify-between font-medium"><span>Days School Opened:</span> <span className="font-bold">{reportDetails?.days_school_open || '-'}</span></div><div className="flex justify-between font-medium"><span>Days Present:</span> <span className="font-bold">{reportDetails?.days_present || '-'}</span></div><div className="flex justify-between font-medium"><span>Days Absent:</span> <span className="font-bold">{reportDetails?.days_absent || '-'}</span></div></div></div> 
+                               </div> 
+                               <div className="flex-1 border-2 border-black"><div className="bg-gray-200 text-black font-bold p-1 text-center border-b-2 border-black uppercase text-[9px] sm:text-[10px] md:text-xs tracking-wider">Psychomotor Domain</div><div className="p-1">{PSYCHOMOTOR_KEYS.map(k => (<div key={k} className="flex justify-between text-[9px] sm:text-[11px] md:text-xs border-b border-gray-200 last:border-0 px-1 py-0.5"><span className="uppercase text-gray-700">{k}</span> <span className="font-black">{reportDetails?.psychomotor_skills?.[k] || '-'}</span></div>))}</div><div className="p-1 text-[8px] sm:text-[9px] text-center border-t border-gray-300 text-gray-500 mt-1">Scale: 5-Excellent, 4-Very Good, 3-Good, 2-Fair, 1-Poor</div></div> <div className="flex-1 border-2 border-black"><div className="bg-gray-200 text-black font-bold p-1 text-center border-b-2 border-black uppercase text-[9px] sm:text-[10px] md:text-xs tracking-wider">Affective Domain</div><div className="p-1">{AFFECTIVE_KEYS.map(k => (<div key={k} className="flex justify-between text-[9px] sm:text-[11px] md:text-xs border-b border-gray-200 last:border-0 px-1 py-0.5"><span className="uppercase text-gray-700">{k}</span> <span className="font-black">{reportDetails?.affective_skills?.[k] || '-'}</span></div>))}</div></div> 
+                            </div>
+                            
                             <div className="space-y-4 page-break-avoid border-2 border-black p-3 sm:p-4 text-xs sm:text-sm bg-yellow-50/50"> <div><span className="font-bold uppercase underline text-red-800">Class Teacher's Remark:</span><span className="ml-2 font-serif italic font-medium">"{reportDetails?.class_teacher_remark || 'Satisfactory performance.'}"</span></div> <div className="pt-6 mt-4 flex justify-between items-end"><div className="text-center w-1/2 pr-2"><div className="w-full max-w-[160px] mx-auto border-b border-black mb-1"></div><span className="text-[8px] sm:text-[10px] font-bold uppercase tracking-widest text-gray-600 line-clamp-1">Class Teacher's Signature</span></div><div className="text-center w-1/2 pl-2"><div className="w-full max-w-[160px] mx-auto border-b border-black mb-1"></div><span className="text-[8px] sm:text-[10px] font-bold uppercase tracking-widest text-gray-600 line-clamp-1">Principal's Signature & Date</span></div></div> </div>
                         </div>
                     </div>
