@@ -8,7 +8,7 @@ import SEO from "@/components/SEO";
 import logo from "/school-logo.png";
 
 type ResultBatch = { id: string; term: string; session: string; class_level: string; subject: string; teacher_name: string; student_count: number; results: any[]; };
-const CLASS_ARMS: Record<string, string[]> = { "KG 1": ["Gold", "Diamond", "Silver"], "KG 2": ["Candy", "Chocolate", "Strawberry"], "KG 3": ["Rose", "Vanilla", "Sweet"], "Pry 1": ["Greatness", "Glorious", "Progress"], "Pry 2": ["Mars", "Jupiter", "Venus"], "Pry 3": ["Pluto", "Neptune", "Uranus"], "Pry 4": ["South America", "North America", "Africa", "Europe"], "Pry 5": ["Asia", "Antarctica"] };
+const CLASS_ARMS: Record<string, string[]> = { "KG 1": ["Gold", "Diamond", "Silver"], "KG 2": ["Candy", "Chocolate", "Strawberry"], "KG 3": ["Rose", "Vanilla", "Sweet"], "Pry 1": ["Greatness", "Glorious", "Progress"], "Pry 2": ["Mars", "Jupiter", "Mercury"], "Pry 3": ["Pluto", "Neptune", "Uranus"], "Pry 4": ["South America", "North America", "Africa", "Europe"], "Pry 5": ["Asia", "Antarctica"] };
 
 const HeadTeacherDashboard = () => {
   const navigate = useNavigate();
