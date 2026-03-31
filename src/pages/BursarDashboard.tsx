@@ -13,6 +13,18 @@ import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import logo from "/school-logo.png";
 
+// FIX: Added the centralized CLASS_ARMS dictionary so the Bursar matches the rest of the school
+const CLASS_ARMS: Record<string, string[]> = {
+  "KG 1": ["Gold", "Diamond", "Silver"],
+  "KG 2": ["Candy", "Chocolate", "Strawberry"],
+  "KG 3": ["Rose", "Vanilla", "Sweet"],
+  "Pry 1": ["Greatness", "Glorious", "Progress"],
+  "Pry 2": ["Mars", "Jupiter", "Venus"],
+  "Pry 3": ["Pluto", "Neptune", "Uranus"],
+  "Pry 4": ["South America", "North America", "Africa", "Europe"],
+  "Pry 5": ["Asia", "Antarctica"]
+};
+
 const BursarDashboard = () => {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState("overview");
@@ -94,8 +106,17 @@ const BursarDashboard = () => {
     }
   };
 
+  // FIX: Updated to generate specific class arms for Primary based on the dictionary
   const getClassOptions = (section: string) => {
-    if (section === 'Primary') return ['Creche', 'KG 1', 'KG 2', 'KG 3', 'Primary 1', 'Primary 2', 'Primary 3', 'Primary 4', 'Primary 5'];
+    if (section === 'Primary') {
+      const allPrimaryClasses: string[] = ['Creche'];
+      Object.entries(CLASS_ARMS).forEach(([base, arms]) => {
+        arms.forEach(arm => {
+          allPrimaryClasses.push(`${base} ${arm}`);
+        });
+      });
+      return allPrimaryClasses;
+    }
     if (section === 'Secondary') return ['JSS 1', 'JSS 2', 'JSS 3', 'SS 1', 'SS 2', 'SS 3'];
     return [];
   };
@@ -301,7 +322,6 @@ const BursarDashboard = () => {
                  </div>
                </div>
                
-               {/* RESPONSIVE TABLE CONTAINER (The Fix) */}
                <div className="bg-white rounded-2xl shadow-sm border border-purple-100 overflow-hidden">
                  <div className="overflow-x-auto">
                    <table className="w-full text-left min-w-[600px]">

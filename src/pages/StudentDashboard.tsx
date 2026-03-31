@@ -48,8 +48,9 @@ const StudentDashboard = () => {
     const validResults = (resData || []).filter(r => !(r.ca1_score === 0 && r.ca2_score === 0 && r.exam_score === 0 && r.class_quiz === 0 && r.home_quiz === 0));
     setResults(validResults);
     
-    const { data: repData } = await supabase.from('term_reports').select('*').eq('student_id', studentId).eq('term', term).eq('session', session).maybeSingle();
-    setReportDetails(repData);
+    // FIX: Using limit(1) safely grabs the remark without crashing from duplicates
+    const { data: repData } = await supabase.from('term_reports').select('*').eq('student_id', studentId).eq('term', term).eq('session', session).limit(1);
+    setReportDetails(repData?.[0] || null);
 
     if (studentClass) {
        const { data: allClassData } = await supabase.from('results').select('student_id, total_score')
@@ -118,7 +119,6 @@ const StudentDashboard = () => {
                     <div className="flex justify-end print-hide"> <button onClick={() => window.print()} className="px-6 py-3 bg-black text-[#FFD700] font-black rounded-xl shadow-lg hover:bg-gray-900 transition-all flex items-center gap-2 uppercase tracking-wider"><Printer size={18}/> Print A4 Report</button> </div>
                     <div id="result-print-area" className="bg-white rounded-xl md:rounded-2xl shadow-xl border border-gray-200 mx-auto w-full max-w-[210mm] relative overflow-hidden md:overflow-visible print:border-none print:shadow-none">
                         
-                        {/* THE MAGIC PRINT CSS FIX */}
                         <style>{`
                           @media print { 
                             body * { visibility: hidden; } 
@@ -134,7 +134,6 @@ const StudentDashboard = () => {
                         <div className="absolute inset-0 flex items-center justify-center opacity-[0.06] pointer-events-none z-0 overflow-hidden"><img src={logo} alt="Watermark" className="w-[80%] max-w-[400px] aspect-square object-contain" /></div>
                         
                         <div className="relative z-10 p-4 sm:p-6 print:p-2">
-                            {/* HEADER - COMPRESSED FOR PRINT */}
                             <div className="flex flex-col sm:flex-row items-center justify-between border-b-[3px] border-black pb-4 mb-4 print:pb-2 print:mb-2 gap-4"> 
                                 <img src={logo} alt="Logo" className="w-20 h-20 sm:w-24 sm:h-24 print:w-16 print:h-16 object-contain shrink-0" /> 
                                 <div className="text-center flex-1 px-2 sm:px-4"><h1 className="text-xl sm:text-2xl md:text-3xl print:text-xl font-black text-red-700 uppercase tracking-wide">Citadel of Knowledge</h1><h2 className="text-base sm:text-lg md:text-xl print:text-base font-bold text-gray-800 uppercase tracking-widest">International School</h2><p className="text-[10px] sm:text-xs md:text-sm print:text-[9px] font-medium text-gray-600 print:mt-0 mt-1">Adjacent First Bank, Saw-Mill Area, Lagos Road, Ilorin, Kwara State.</p></div> 
@@ -177,7 +176,6 @@ const StudentDashboard = () => {
                               </table>
                             </div>
                             
-                            {/* OVERALL SUMMARY - COMPRESSED */}
                             <div className="flex flex-col md:flex-row gap-4 print:gap-2 mb-4 print:mb-2 page-break-avoid text-xs md:text-sm print:text-[10px]"> 
                                <div className="flex-1 space-y-4 print:space-y-1.5"> 
                                   <div className="border-2 border-black flex"><div className="bg-red-700 text-white font-bold p-2 print:p-1 w-1/2 flex items-center uppercase text-[10px] sm:text-xs print:text-[9px]">Total Score</div><div className="p-2 print:p-1 font-black text-center flex-1">{totalScore}</div></div> 
@@ -189,7 +187,8 @@ const StudentDashboard = () => {
                                <div className="flex-1 border-2 border-black"><div className="bg-gray-200 text-black font-bold p-1 print:py-0.5 text-center border-b-2 border-black uppercase text-[9px] sm:text-[10px] md:text-xs print:text-[9px] tracking-wider">Psychomotor Domain</div><div className="p-1">{PSYCHOMOTOR_KEYS.map(k => (<div key={k} className="flex justify-between text-[9px] sm:text-[11px] md:text-xs print:text-[9px] border-b border-gray-200 last:border-0 px-1 py-0.5 print:py-[1px]"><span className="uppercase text-gray-700">{k}</span> <span className="font-black">{reportDetails?.psychomotor_skills?.[k] || '-'}</span></div>))}</div><div className="p-1 text-[8px] sm:text-[9px] print:text-[7px] text-center border-t border-gray-300 text-gray-500 mt-1">Scale: 5-Excellent, 4-Very Good, 3-Good, 2-Fair, 1-Poor</div></div> <div className="flex-1 border-2 border-black"><div className="bg-gray-200 text-black font-bold p-1 print:py-0.5 text-center border-b-2 border-black uppercase text-[9px] sm:text-[10px] md:text-xs print:text-[9px] tracking-wider">Affective Domain</div><div className="p-1">{AFFECTIVE_KEYS.map(k => (<div key={k} className="flex justify-between text-[9px] sm:text-[11px] md:text-xs print:text-[9px] border-b border-gray-200 last:border-0 px-1 py-0.5 print:py-[1px]"><span className="uppercase text-gray-700">{k}</span> <span className="font-black">{reportDetails?.affective_skills?.[k] || '-'}</span></div>))}</div></div> 
                             </div>
                             
-                            <div className="space-y-4 print:space-y-2 page-break-avoid border-2 border-black p-3 sm:p-4 print:p-2 text-xs sm:text-sm print:text-[10px] bg-yellow-50/50"> <div><span className="font-bold uppercase underline text-red-800">Class Teacher's Remark:</span><span className="ml-2 font-serif italic font-medium">"{reportDetails?.class_teacher_remark || 'Satisfactory performance.'}"</span></div> <div className="pt-6 mt-4 print:pt-4 print:mt-2 flex justify-between items-end"><div className="text-center w-1/2 pr-2"><div className="w-full max-w-[160px] mx-auto border-b border-black mb-1"></div><span className="text-[8px] sm:text-[10px] print:text-[8px] font-bold uppercase tracking-widest text-gray-600 line-clamp-1">Class Teacher's Signature</span></div><div className="text-center w-1/2 pl-2"><div className="w-full max-w-[160px] mx-auto border-b border-black mb-1"></div><span className="text-[8px] sm:text-[10px] print:text-[8px] font-bold uppercase tracking-widest text-gray-600 line-clamp-1">Principal's Signature & Date</span></div></div> </div>
+                            {/* FIX: REMARK FALLBACK UPDATED SO YOU KNOW IF IT FAILED TO SAVE */}
+                            <div className="space-y-4 print:space-y-2 page-break-avoid border-2 border-black p-3 sm:p-4 print:p-2 text-xs sm:text-sm print:text-[10px] bg-yellow-50/50"> <div><span className="font-bold uppercase underline text-red-800">Class Teacher's Remark:</span><span className="ml-2 font-serif italic font-medium">"{reportDetails?.class_teacher_remark || 'No remark provided.'}"</span></div> <div className="pt-6 mt-4 print:pt-4 print:mt-2 flex justify-between items-end"><div className="text-center w-1/2 pr-2"><div className="w-full max-w-[160px] mx-auto border-b border-black mb-1"></div><span className="text-[8px] sm:text-[10px] print:text-[8px] font-bold uppercase tracking-widest text-gray-600 line-clamp-1">Class Teacher's Signature</span></div><div className="text-center w-1/2 pl-2"><div className="w-full max-w-[160px] mx-auto border-b border-black mb-1"></div><span className="text-[8px] sm:text-[10px] print:text-[8px] font-bold uppercase tracking-widest text-gray-600 line-clamp-1">Principal's Signature & Date</span></div></div> </div>
                         </div>
                     </div>
                   </div>

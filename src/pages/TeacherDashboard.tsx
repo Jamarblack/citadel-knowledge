@@ -10,7 +10,7 @@ import Logo from "/school-logo.png";
 const PSYCHOMOTOR_KEYS = ["Handwriting", "Sports", "Fluency", "Drawing", "Handling Tools"];
 const AFFECTIVE_KEYS = ["Punctuality", "Neatness", "Politeness", "Honesty", "Leadership", "Attentiveness"];
 
-const CLASS_ARMS: Record<string, string[]> = { "KG 1": ["Gold", "Diamond", "Silver"], "KG 2": ["Candy", "Chocolate", "Strawberry"], "KG 3": ["Rose", "Vanilla", "Sweet"], "Pry 1": ["Greatness", "Glorious", "Progress"], "Pry 2": ["Mars", "Jupiter", "Mercury"], "Pry 3": ["Pluto", "Neptune", "Uranus"], "Pry 4": ["South America", "North America", "Africa", "Europe"], "Pry 5": ["Asia", "Antarctica"], "Creche": [], "JSS 1": [], "JSS 2": [], "JSS 3": [], "SS 1": [], "SS 2": [], "SS 3": [] };
+const CLASS_ARMS: Record<string, string[]> = { "KG 1": ["Gold", "Diamond", "Silver"], "KG 2": ["Candy", "Chocolate", "Strawberry"], "KG 3": ["Rose", "Vanilla", "Sweet"], "Pry 1": ["Greatness", "Glorious", "Progress"], "Pry 2": ["Mars", "Jupiter", "Venus"], "Pry 3": ["Pluto", "Neptune", "Uranus"], "Pry 4": ["South America", "North America", "Africa", "Europe"], "Pry 5": ["Asia", "Antarctica"], "Creche": [], "JSS 1": [], "JSS 2": [], "JSS 3": [], "SS 1": [], "SS 2": [], "SS 3": [] };
 
 const TeacherDashboard = () => {
   const navigate = useNavigate();
@@ -120,7 +120,6 @@ const TeacherDashboard = () => {
                 student_id: e.student_id, student_name: e.student_name, admission_number: e.admission_number, subject: uploadSubject, class_level: fullClassName, 
                 term: globalSettings.term, session: globalSettings.session, teacher_id: teacherProfile.id, teacher_name: teacherProfile.full_name,
                 class_quiz: Number(e.class_quiz) || 0, home_quiz: Number(e.home_quiz) || 0, ca1_score: Number(e.ca1) || 0, ca2_score: Number(e.ca2) || 0, exam_score: Number(e.exam) || 0,
-                // REMOVED total_score - The DB will auto-calculate it now!
                 grade: grade || 'F', position: e.position || '-', remarks: remark || 'Fail', status: targetStatus 
             };
         });
@@ -151,11 +150,42 @@ const TeacherDashboard = () => {
           setStudentGrades([]);
       }
 
-      const { data: existingReport } = await supabase.from('term_reports').select('*').eq('student_id', student.id).eq('term', globalSettings.term).maybeSingle(); 
-      if (existingReport) { setReportData({ attendance: { open: existingReport.days_school_open || 110, present: existingReport.days_present || 0, absent: existingReport.days_absent || 0 }, psychomotor: existingReport.psychomotor_skills || {}, affective: existingReport.affective_skills || {}, remark: existingReport.class_teacher_remark || "" }); } else { setReportData({ attendance: { open: 110, present: 0, absent: 0 }, psychomotor: {}, affective: {}, remark: "" }); } 
+      // FIX: Use .limit(1) instead of .maybeSingle() to bypass duplicate ghost crashes!
+      const { data: existingReports } = await supabase.from('term_reports')
+        .select('*').eq('student_id', student.id).eq('term', globalSettings.term).eq('session', globalSettings.session).limit(1); 
+      
+      const existingReport = existingReports?.[0];
+
+      if (existingReport) { setReportData({ attendance: { open: existingReport.days_school_open || 110, present: existingReport.days_present || 0, absent: existingReport.days_absent || 0 }, psychomotor: existingReport.psychomotor_skills || {}, affective: existingReport.affective_skills || {}, remark: existingReport.class_teacher_remark || "" }); } 
+      else { setReportData({ attendance: { open: 110, present: 0, absent: 0 }, psychomotor: {}, affective: {}, remark: "" }); } 
   };
   
-  const saveReportDetails = async () => { if (!selectedStudent) return; setLoading(true); try { const payload = { student_id: selectedStudent.id, session: globalSettings.session, term: globalSettings.term, class_level: teacherProfile.assigned_class, days_school_open: reportData.attendance.open, days_present: reportData.attendance.present, days_absent: reportData.attendance.absent, psychomotor_skills: reportData.psychomotor, affective_skills: reportData.affective, class_teacher_remark: reportData.remark }; const { error } = await supabase.from('term_reports').upsert(payload, { onConflict: 'student_id, session, term' }); if (error) throw error; toast.success("Saved!"); setSelectedStudent(null); } catch (e: any) { toast.error(e.message); } finally { setLoading(false); } };
+  // FIX: Forceful check-then-update instead of Upsert to prevent DB Constraint failures!
+  const saveReportDetails = async () => { 
+      if (!selectedStudent) return; 
+      setLoading(true); 
+      try { 
+          const payload = { student_id: selectedStudent.id, session: globalSettings.session, term: globalSettings.term, class_level: teacherProfile.assigned_class, days_school_open: reportData.attendance.open, days_present: reportData.attendance.present, days_absent: reportData.attendance.absent, psychomotor_skills: reportData.psychomotor, affective_skills: reportData.affective, class_teacher_remark: reportData.remark }; 
+          
+          const { data: check } = await supabase.from('term_reports').select('id').eq('student_id', selectedStudent.id).eq('term', globalSettings.term).eq('session', globalSettings.session).limit(1);
+
+          if (check && check.length > 0) {
+              const { error } = await supabase.from('term_reports').update(payload).eq('id', check[0].id);
+              if (error) throw error;
+          } else {
+              const { error } = await supabase.from('term_reports').insert([payload]);
+              if (error) throw error;
+          }
+
+          toast.success("Report Saved Successfully!"); 
+          setSelectedStudent(null); 
+      } catch (e: any) { 
+          toast.error("Error Saving: " + e.message); 
+      } finally { 
+          setLoading(false); 
+      } 
+  };
+  
   const filteredSubjects = subjects.filter(sub => sub.section === 'General' || sub.section === (teacherProfile?.section || 'Secondary'));
 
   const SidebarContent = () => ( <div className="h-full flex flex-col"> <div className="p-8 text-center bg-amber-50/50 border-b border-amber-100"> <div className="w-24 h-24 mx-auto rounded-full bg-amber-900 border-4 border-amber-100 relative group overflow-hidden"> {teacherProfile?.passport_url ? <img src={teacherProfile.passport_url} className="w-full h-full object-cover"/> : <span className="flex items-center justify-center h-full text-3xl font-bold text-white">{teacherProfile?.full_name?.[0] || 'T'}</span>} <label className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"><Camera className="text-white" size={24} /><input type="file" className="hidden" accept="image/*" onChange={handleFileUpload} disabled={uploading} /></label> </div> <h3 className="font-bold text-amber-950 mt-3 truncate px-2">{teacherProfile?.full_name || 'Staff Member'}</h3> <span className="text-xs font-bold text-amber-600 uppercase tracking-widest">{teacherProfile?.section} Teacher</span> </div> <nav className="flex-1 p-4 space-y-2"> <button onClick={() => {setActiveTab('my_class'); setIsMobileMenuOpen(false);}} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold transition-all ${activeTab === 'my_class' ? 'bg-amber-900 text-white shadow-lg' : 'text-gray-500 hover:bg-amber-50'}`}><BookOpen size={20} /> My Class</button> <button onClick={() => {setActiveTab('upload'); setIsMobileMenuOpen(false);}} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold transition-all ${activeTab === 'upload' ? 'bg-amber-900 text-white shadow-lg' : 'text-gray-500 hover:bg-amber-50'}`}><Upload size={20} /> Upload Results</button> </nav> <div className="p-4 border-t"><button onClick={() => { localStorage.clear(); navigate('/'); }} className="w-full py-3 text-red-600 font-bold hover:bg-red-50 rounded-xl flex items-center justify-center gap-2"><LogOut size={18} /> Sign Out</button></div> </div> );
