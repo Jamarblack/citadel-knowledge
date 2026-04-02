@@ -19,7 +19,7 @@ const CLASS_ARMS: Record<string, string[]> = {
   "KG 2": ["Candy", "Chocolate", "Strawberry"],
   "KG 3": ["Rose", "Vanilla", "Sweet"],
   "Pry 1": ["Greatness", "Glorious", "Progress"],
-  "Pry 2": ["Mars", "Jupiter", "Venus"],
+  "Pry 2": ["Mars", "Jupiter", "Mercury"],
   "Pry 3": ["Pluto", "Neptune", "Uranus"],
   "Pry 4": ["South America", "North America", "Africa", "Europe"],
   "Pry 5": ["Asia", "Antarctica"]
