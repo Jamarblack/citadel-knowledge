@@ -17,6 +17,22 @@ const getOrdinal = (n: number) => {
   return s[(v - 20) % 10] || s[v] || s[0];
 };
 
+// THE SHIELD: Updated to perfectly match your database screenshot!
+const isExcludedFromTotal = (subject: string, className: string) => {
+  const isSec = className?.includes("JSS") || className?.includes("SS");
+  if (isSec) return false; // Secondary school counts everything
+  
+  const s = (subject || '').toLowerCase();
+  return s.includes('drawing') || 
+         s.includes('writing') || // Added to match the DB exactly
+         s.includes('handwriting') || 
+         s.includes('yoruba') || 
+         s.includes('christian') || 
+         s.includes('islamic') || 
+         s.includes('crs') || 
+         s.includes('irs');
+};
+
 const StudentDashboard = () => {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState("result");
@@ -59,17 +75,21 @@ const StudentDashboard = () => {
     setReportDetails(repData?.[0] || null);
 
     if (studentClass) {
-       const { data: allClassData } = await supabase.from('results').select('student_id, class_quiz, home_quiz, ca1_score, ca2_score, exam_score, total_score')
+       const { data: allClassData } = await supabase.from('results').select('student_id, subject, class_quiz, home_quiz, ca1_score, ca2_score, exam_score, total_score')
          .eq('class_level', studentClass).eq('term', term).eq('session', session).eq('status', 'approved');
        
        if (allClassData) {
          const studentStats: Record<string, { total: number, count: number }> = {};
          allClassData.forEach(r => {
             const trueTotal = (Number(r.class_quiz) || 0) + (Number(r.home_quiz) || 0) + (Number(r.ca1_score) || 0) + (Number(r.ca2_score) || 0) + (Number(r.exam_score) || 0);
+            
             if (trueTotal > 0) { 
                 if (!studentStats[r.student_id]) studentStats[r.student_id] = { total: 0, count: 0 };
-                studentStats[r.student_id].total += trueTotal;
-                studentStats[r.student_id].count += 1;
+                
+                if (!isExcludedFromTotal(r.subject, studentClass)) {
+                    studentStats[r.student_id].total += trueTotal;
+                    studentStats[r.student_id].count += 1;
+                }
             }
          });
          const ranked = Object.entries(studentStats).map(([id, stats]) => ({
@@ -102,8 +122,9 @@ const StudentDashboard = () => {
     }
   };
 
-  const totalScore = results.reduce((acc, curr) => acc + curr.computedTotal, 0);
-  const averageScore = results.length > 0 ? Math.round(totalScore / results.length) : 0;
+  const includedResults = results.filter(r => !isExcludedFromTotal(r.subject, studentProfile?.current_class || ''));
+  const totalScore = includedResults.reduce((acc, curr) => acc + curr.computedTotal, 0);
+  const averageScore = includedResults.length > 0 ? Math.round(totalScore / includedResults.length) : 0;
 
   const SidebarContent = () => ( <div className="h-full flex flex-col bg-[#FFD700] border-r-4 border-black"> <div className="p-8 text-center bg-[#FFD700]"> <div className="w-28 h-28 mx-auto rounded-full bg-white border-4 border-red-600 shadow-xl overflow-hidden flex items-center justify-center"> {studentProfile?.passport_url ? <img src={studentProfile.passport_url} className="w-full h-full object-cover"/> : <span className="text-5xl font-black text-red-600">{studentProfile?.full_name?.[0]}</span>} </div> <h3 className="font-black text-black text-xl mt-4 leading-tight">{studentProfile?.full_name}</h3> <span className="text-xs font-bold bg-black text-[#FFD700] px-4 py-1 rounded-full mt-2 inline-block uppercase tracking-widest shadow-sm"> {studentProfile?.current_class} </span> </div> <nav className="flex-1 p-4 space-y-3 mt-4"> <button onClick={() => { setActiveTab('result'); setIsMobileMenuOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-4 rounded-xl font-bold transition-all ${activeTab === 'result' ? 'bg-black text-[#FFD700] shadow-lg translate-x-2' : 'text-gray-900 hover:bg-yellow-300'}`}> <FileText size={20} /> Check Result </button> <button onClick={() => { setActiveTab('profile'); setIsMobileMenuOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-4 rounded-xl font-bold transition-all ${activeTab === 'profile' ? 'bg-black text-[#FFD700] shadow-lg translate-x-2' : 'text-gray-900 hover:bg-yellow-300'}`}> <User size={20} /> My Profile </button> </nav> <div className="p-6"> <button onClick={() => { localStorage.clear(); navigate('/'); }} className="w-full py-4 bg-red-600 text-white hover:bg-red-700 rounded-xl flex items-center justify-center gap-2 font-black shadow-lg transition-all uppercase tracking-wider"> <LogOut size={18} /> Logout </button> </div> </div> );
 
@@ -131,7 +152,6 @@ const StudentDashboard = () => {
                             body * { visibility: hidden; } 
                             #result-print-area, #result-print-area * { visibility: visible; } 
                             #result-print-area { position: absolute; left: 0; top: 0; width: 100%; max-width: 100%; margin: 0; padding: 0; box-shadow: none; border: none; background: white; color: black !important; } 
-                            /* REDUCED PAGE MARGINS FOR MORE SPACE */
                             @page { size: A4 portrait; margin: 3mm; } 
                             * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; } 
                             .print-hide { display: none !important; } 
@@ -141,9 +161,7 @@ const StudentDashboard = () => {
 
                         <div className="absolute inset-0 flex items-center justify-center opacity-[0.06] pointer-events-none z-0 overflow-hidden"><img src={logo} alt="Watermark" className="w-[80%] max-w-[400px] aspect-square object-contain" /></div>
                         
-                        {/* REDUCED OVERALL PRINT PADDING */}
                         <div className="relative z-10 p-4 sm:p-6 print:p-0 print:px-2">
-                            {/* REDUCED HEADER PADDING AND LOGO SIZES FOR PRINT */}
                             <div className="flex flex-col sm:flex-row items-center justify-between border-b-[3px] border-black pb-4 mb-4 print:pb-1 print:mb-1 gap-4 print:gap-1"> 
                                 <img src={logo} alt="Logo" className="w-20 h-20 sm:w-24 sm:h-24 print:w-12 print:h-12 object-contain shrink-0" /> 
                                 <div className="text-center flex-1 px-2 sm:px-4"><h1 className="text-xl sm:text-2xl md:text-3xl print:text-lg font-black text-red-700 uppercase tracking-wide">Citadel of Knowledge</h1><h2 className="text-base sm:text-lg md:text-xl print:text-[11px] font-bold text-gray-800 uppercase tracking-widest">International School</h2><p className="text-[10px] sm:text-xs md:text-sm print:text-[7px] font-medium text-gray-600 print:mt-0 mt-1">Adjacent First Bank, Saw-Mill Area, Lagos Road, Ilorin, Kwara State.</p></div> 
@@ -175,9 +193,15 @@ const StudentDashboard = () => {
                                      const trueTotal = res.computedTotal; 
                                      const { grade, remark } = getGradeAndRemark(trueTotal, studentProfile?.current_class);
                                      const gradeColor = (grade === 'A' || grade === 'B') ? 'text-green-700' : (grade === 'C' || grade === 'D') ? 'text-yellow-600' : 'text-red-600';
+                                     
+                                     const isExcluded = isExcludedFromTotal(res.subject, studentProfile?.current_class);
+
                                      return (
-                                       <tr key={i} className="even:bg-gray-50 border-b border-gray-300">
-                                         <td className="p-1 print:py-[1px] print:px-0.5 text-center border-r border-gray-300 font-bold text-gray-500">{i + 1}</td> <td className="p-1 print:py-[1px] print:px-0.5 font-bold text-gray-900 border-r border-gray-300 uppercase truncate max-w-[120px]">{res.subject}</td>
+                                       <tr key={i} className={`border-b border-gray-300 ${isExcluded ? 'bg-orange-50/30' : 'even:bg-gray-50'}`}>
+                                         <td className="p-1 print:py-[1px] print:px-0.5 text-center border-r border-gray-300 font-bold text-gray-500">{i + 1}</td> 
+                                         <td className="p-1 print:py-[1px] print:px-0.5 font-bold text-gray-900 border-r border-gray-300 uppercase truncate max-w-[120px]">
+                                            {res.subject} {isExcluded && <span className="text-[6px] text-gray-400 ml-1 print:hidden">*</span>}
+                                         </td>
                                          {!isSecondary && <td className="p-1 print:py-[1px] print:px-0.5 text-center font-medium border-r border-gray-300">{res.class_quiz || '-'}</td>} {!isSecondary && <td className="p-1 print:py-[1px] print:px-0.5 text-center font-medium border-r border-gray-300">{res.home_quiz || '-'}</td>}
                                          <td className="p-1 print:py-[1px] print:px-0.5 text-center font-medium border-r border-gray-300">{res.ca1_score || '-'}</td> <td className="p-1 print:py-[1px] print:px-0.5 text-center font-medium border-r border-gray-300">{res.ca2_score || '-'}</td> <td className="p-1 print:py-[1px] print:px-0.5 text-center font-medium border-r border-gray-300">{res.exam_score || '-'}</td> <td className="p-1 print:py-[1px] print:px-0.5 text-center font-black border-r border-black bg-yellow-50">{trueTotal}</td> <td className={`p-1 print:py-[1px] print:px-0.5 text-center font-black border-r border-gray-300 ${gradeColor}`}>{grade}</td> <td className="p-1 print:py-[1px] print:px-0.5 text-center font-black border-r border-gray-300 text-green-700">{res.position || '-'}</td> <td className="p-1 print:py-[1px] print:px-0.5 text-center font-bold text-gray-600 uppercase tracking-wider truncate max-w-[80px]">{remark}</td>
                                        </tr>
@@ -187,7 +211,6 @@ const StudentDashboard = () => {
                               </table>
                             </div>
                             
-                            {/* REDUCED GAPS IN SUMMARY SECTION */}
                             <div className="flex flex-col md:flex-row gap-4 print:gap-1.5 mb-4 print:mb-1 page-break-avoid text-xs md:text-sm print:text-[8px]"> 
                                <div className="flex-1 space-y-4 print:space-y-1"> 
                                   <div className="border-2 border-black flex"><div className="bg-red-700 text-white font-bold p-2 print:p-0.5 w-1/2 flex items-center uppercase text-[10px] sm:text-xs print:text-[7px]">Total Score</div><div className="p-2 print:p-0.5 font-black text-center flex-1">{totalScore}</div></div> 
@@ -199,24 +222,15 @@ const StudentDashboard = () => {
                                <div className="flex-1 border-2 border-black"><div className="bg-gray-200 text-black font-bold p-1 print:py-0.5 text-center border-b-2 border-black uppercase text-[9px] sm:text-[10px] md:text-xs print:text-[7px] tracking-wider">Psychomotor Domain</div><div className="p-1 print:p-0.5">{PSYCHOMOTOR_KEYS.map(k => (<div key={k} className="flex justify-between text-[9px] sm:text-[11px] md:text-xs print:text-[7px] border-b border-gray-200 last:border-0 px-1 py-0.5 print:py-0"><span className="uppercase text-gray-700">{k}</span> <span className="font-black">{reportDetails?.psychomotor_skills?.[k] || '-'}</span></div>))}</div><div className="p-1 text-[8px] sm:text-[9px] print:text-[5px] text-center border-t border-gray-300 text-gray-500 mt-1 print:mt-0">Scale: 5-Excellent, 4-Very Good, 3-Good, 2-Fair, 1-Poor</div></div> <div className="flex-1 border-2 border-black"><div className="bg-gray-200 text-black font-bold p-1 print:py-0.5 text-center border-b-2 border-black uppercase text-[9px] sm:text-[10px] md:text-xs print:text-[7px] tracking-wider">Affective Domain</div><div className="p-1 print:p-0.5">{AFFECTIVE_KEYS.map(k => (<div key={k} className="flex justify-between text-[9px] sm:text-[11px] md:text-xs print:text-[7px] border-b border-gray-200 last:border-0 px-1 py-0.5 print:py-0"><span className="uppercase text-gray-700">{k}</span> <span className="font-black">{reportDetails?.affective_skills?.[k] || '-'}</span></div>))}</div></div> 
                             </div>
                             
-                            {/* COMPRESSED SIGNATURE SECTION WITH SVGS */}
                             <div className="space-y-4 print:space-y-1 page-break-avoid border-2 border-black p-3 sm:p-4 print:p-1.5 text-xs sm:text-sm print:text-[8px] bg-yellow-50/50"> 
                                 <div><span className="font-bold uppercase underline text-red-800">Class Teacher's Remark:</span><span className="ml-2 font-serif italic font-medium">"{reportDetails?.class_teacher_remark || 'No remark provided.'}"</span></div> 
                                 
                                 <div className="pt-2 mt-2 print:pt-1 print:mt-1 flex justify-end items-end">
                                     <div className="text-center w-48 sm:w-56 print:w-32">
                                         {isSecondary ? (
-                                            <img 
-                                                src={principalSignature} 
-                                                alt="Principal Signature" 
-                                                className="h-12 sm:h-16 print:h-8 mx-auto object-contain" 
-                                            />
+                                            <img src={principalSignature} alt="Principal Signature" className="h-12 sm:h-16 print:h-8 mx-auto object-contain" />
                                         ) : (
-                                            <img 
-                                                src={hsignature} 
-                                                alt="Head Teacher Signature" 
-                                                className="h-20 w-20 print:h-8 print:w-auto mx-auto object-contain" 
-                                            />
+                                            <img src={hsignature} alt="Head Teacher Signature" className="h-20 w-20 print:h-8 print:w-auto mx-auto object-contain" />
                                         )}
                                         <div className="w-full border-b-[1.5px] border-black mb-1 mt-1 print:mt-0"></div>
                                         <span className="text-[8px] sm:text-[10px] print:text-[6px] font-bold uppercase tracking-widest text-gray-800 line-clamp-1">

@@ -385,7 +385,7 @@ const LandingPage = () => {
                     <div className="space-y-4">
                         <div className="flex items-center gap-4 text-gray-700">
                             <div className="w-10 h-10 rounded-full bg-white flex items-center justify-center text-amber-600 shadow-sm"><Phone size={18} /></div>
-                            <span className="font-medium">+234 800 123 4567</span>
+                            <span className="font-medium">+234 806 087 1839, +234 810 427 3747</span>
                         </div>
                         <div className="flex items-center gap-4 text-gray-700">
                             <div className="w-10 h-10 rounded-full bg-white flex items-center justify-center text-amber-600 shadow-sm"><Mail size={18} /></div>
