@@ -5,6 +5,8 @@ import { supabase } from "@/lib/supabase";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import SEO from "@/components/SEO";
 import logo from "/school-logo.png";
+import hsignature from "@/assets/HeadTeacherSign.svg";
+import principalSignature from "@/assets/PrincipalStamp.svg";
 
 const PSYCHOMOTOR_KEYS = ["Handwriting", "Sports", "Fluency", "Drawing", "Handling Tools"];
 const AFFECTIVE_KEYS = ["Punctuality", "Neatness", "Politeness", "Honesty", "Leadership", "Attentiveness"];
@@ -47,7 +49,6 @@ const StudentDashboard = () => {
     const { data: resData } = await supabase.from('results').select('*').eq('student_id', studentId).eq('term', term).eq('session', session).eq('status', 'approved');
     const validResults = (resData || []).filter(r => !(r.ca1_score === 0 && r.ca2_score === 0 && r.exam_score === 0 && r.class_quiz === 0 && r.home_quiz === 0));
     
-    // THE MATH FIX: Calculate the TRUE total on the fly directly from the individual scores!
     const recalculatedResults = validResults.map(res => {
         const trueTotal = (Number(res.class_quiz) || 0) + (Number(res.home_quiz) || 0) + (Number(res.ca1_score) || 0) + (Number(res.ca2_score) || 0) + (Number(res.exam_score) || 0);
         return { ...res, computedTotal: trueTotal };
@@ -58,16 +59,13 @@ const StudentDashboard = () => {
     setReportDetails(repData?.[0] || null);
 
     if (studentClass) {
-       // Fetching the raw scores for the whole class to ensure accurate rankings
        const { data: allClassData } = await supabase.from('results').select('student_id, class_quiz, home_quiz, ca1_score, ca2_score, exam_score, total_score')
          .eq('class_level', studentClass).eq('term', term).eq('session', session).eq('status', 'approved');
        
        if (allClassData) {
          const studentStats: Record<string, { total: number, count: number }> = {};
          allClassData.forEach(r => {
-            // Calculating TRUE totals for every student in the class for perfect rankings
             const trueTotal = (Number(r.class_quiz) || 0) + (Number(r.home_quiz) || 0) + (Number(r.ca1_score) || 0) + (Number(r.ca2_score) || 0) + (Number(r.exam_score) || 0);
-            
             if (trueTotal > 0) { 
                 if (!studentStats[r.student_id]) studentStats[r.student_id] = { total: 0, count: 0 };
                 studentStats[r.student_id].total += trueTotal;
@@ -104,7 +102,6 @@ const StudentDashboard = () => {
     }
   };
 
-  // Uses the perfectly computed total instead of the old database total
   const totalScore = results.reduce((acc, curr) => acc + curr.computedTotal, 0);
   const averageScore = results.length > 0 ? Math.round(totalScore / results.length) : 0;
 
@@ -172,7 +169,6 @@ const StudentDashboard = () => {
                                 </thead>
                                 <tbody className="text-[9px] sm:text-[10px] md:text-xs print:text-[9px]">
                                    {results.map((res, i) => {
-                                     // USES TRUE COMPUTED TOTAL INSTEAD OF RAW DB TOTAL
                                      const trueTotal = res.computedTotal; 
                                      const { grade, remark } = getGradeAndRemark(trueTotal, studentProfile?.current_class);
                                      const gradeColor = (grade === 'A' || grade === 'B') ? 'text-green-700' : (grade === 'C' || grade === 'D') ? 'text-yellow-600' : 'text-red-600';
@@ -199,7 +195,33 @@ const StudentDashboard = () => {
                                <div className="flex-1 border-2 border-black"><div className="bg-gray-200 text-black font-bold p-1 print:py-0.5 text-center border-b-2 border-black uppercase text-[9px] sm:text-[10px] md:text-xs print:text-[9px] tracking-wider">Psychomotor Domain</div><div className="p-1">{PSYCHOMOTOR_KEYS.map(k => (<div key={k} className="flex justify-between text-[9px] sm:text-[11px] md:text-xs print:text-[9px] border-b border-gray-200 last:border-0 px-1 py-0.5 print:py-[1px]"><span className="uppercase text-gray-700">{k}</span> <span className="font-black">{reportDetails?.psychomotor_skills?.[k] || '-'}</span></div>))}</div><div className="p-1 text-[8px] sm:text-[9px] print:text-[7px] text-center border-t border-gray-300 text-gray-500 mt-1">Scale: 5-Excellent, 4-Very Good, 3-Good, 2-Fair, 1-Poor</div></div> <div className="flex-1 border-2 border-black"><div className="bg-gray-200 text-black font-bold p-1 print:py-0.5 text-center border-b-2 border-black uppercase text-[9px] sm:text-[10px] md:text-xs print:text-[9px] tracking-wider">Affective Domain</div><div className="p-1">{AFFECTIVE_KEYS.map(k => (<div key={k} className="flex justify-between text-[9px] sm:text-[11px] md:text-xs print:text-[9px] border-b border-gray-200 last:border-0 px-1 py-0.5 print:py-[1px]"><span className="uppercase text-gray-700">{k}</span> <span className="font-black">{reportDetails?.affective_skills?.[k] || '-'}</span></div>))}</div></div> 
                             </div>
                             
-                            <div className="space-y-4 print:space-y-2 page-break-avoid border-2 border-black p-3 sm:p-4 print:p-2 text-xs sm:text-sm print:text-[10px] bg-yellow-50/50"> <div><span className="font-bold uppercase underline text-red-800">Class Teacher's Remark:</span><span className="ml-2 font-serif italic font-medium">"{reportDetails?.class_teacher_remark || 'No remark provided.'}"</span></div> <div className="pt-6 mt-4 print:pt-4 print:mt-2 flex justify-between items-end"><div className="text-center w-1/2 pr-2"><div className="w-full max-w-[160px] mx-auto border-b border-black mb-1"></div><span className="text-[8px] sm:text-[10px] print:text-[8px] font-bold uppercase tracking-widest text-gray-600 line-clamp-1">Class Teacher's Signature</span></div><div className="text-center w-1/2 pl-2"><div className="w-full max-w-[160px] mx-auto border-b border-black mb-1"></div><span className="text-[8px] sm:text-[10px] print:text-[8px] font-bold uppercase tracking-widest text-gray-600 line-clamp-1">{isSecondary ? "Principal's Signature & Date" : "Head Teacher's Signature & Date"}</span></div></div> </div>
+                            {/* UPDATED SIGNATURE SECTION WITH SVGS */}
+                            <div className="space-y-4 print:space-y-2 page-break-avoid border-2 border-black p-3 sm:p-4 print:p-2 text-xs sm:text-sm print:text-[10px] bg-yellow-50/50"> 
+                                <div><span className="font-bold uppercase underline text-red-800">Class Teacher's Remark:</span><span className="ml-2 font-serif italic font-medium">"{reportDetails?.class_teacher_remark || 'No remark provided.'}"</span></div> 
+                                
+                                <div className="pt-2 mt-2 flex justify-end items-end">
+                                    <div className="text-center w-48 sm:w-56">
+                                        {isSecondary ? (
+                                            <img 
+                                                src={principalSignature} 
+                                                alt="Principal Signature" 
+                                                className="h-12 sm:h-16 mx-auto object-contain" 
+                                            />
+                                        ) : (
+                                            <img 
+                                                src={hsignature} 
+                                                alt="Head Teacher Signature" 
+                                                className="h-20 w-20 mx-auto object-contain" 
+                                            />
+                                        )}
+                                        <div className="w-full border-b-[1.5px] border-black mb-1 mt-1"></div>
+                                        <span className="text-[8px] sm:text-[10px] print:text-[8px] font-bold uppercase tracking-widest text-gray-800 line-clamp-1">
+                                            {isSecondary ? "Principal's Signature & Date" : "Head Teacher's Signature & Date"}
+                                        </span>
+                                    </div>
+                                </div> 
+                            </div>
+
                         </div>
                     </div>
                   </div>

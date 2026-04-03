@@ -8,7 +8,7 @@ import SEO from "@/components/SEO";
 import logo from "/school-logo.png";
 
 type ResultBatch = { id: string; term: string; session: string; class_level: string; subject: string; teacher_name: string; student_count: number; results: any[]; };
-const CLASS_ARMS: Record<string, string[]> = { "KG 1": ["Gold", "Diamond", "Silver"], "KG 2": ["Candy", "Chocolate", "Strawberry"], "KG 3": ["Rose", "Vanilla", "Sweet"], "Pry 1": ["Greatness", "Glorious", "Progress"], "Pry 2": ["Mars", "Jupiter", "Mercury"], "Pry 3": ["Pluto", "Neptune", "Uranus"], "Pry 4": ["South America", "North America", "Africa", "Europe"], "Pry 5": ["Asia", "Antarctica"] };
+const CLASS_ARMS: Record<string, string[]> = { "KG 1": ["Gold", "Diamond", "Silver"], "KG 2": ["Candy", "Chocolate", "Strawberry"], "KG 3": ["Rose", "Vanilla", "Sweet"], "Pry 1": ["Greatness", "Glorious", "Progress"], "Pry 2": ["Mars", "Jupiter", "Venus"], "Pry 3": ["Pluto", "Neptune", "Uranus"], "Pry 4": ["South America", "North America", "Africa", "Europe"], "Pry 5": ["Asia", "Antarctica"] };
 
 const HeadTeacherDashboard = () => {
   const navigate = useNavigate();
@@ -90,7 +90,6 @@ const HeadTeacherDashboard = () => {
   const fetchStudents = async () => { const { data } = await supabase.from('students').select('*').or('current_class.ilike.%Pry%,current_class.ilike.%KG%').order('full_name', { ascending: true }); setStudentList(data || []); };
   const fetchTeachers = async () => { const { data } = await supabase.from('staff').select('*').eq('role', 'Teacher').eq('section', 'Primary').order('full_name', { ascending: true }); setTeacherList(data || []); };
   
-  // FIX: Unlocks the 1000 row limit AND fixes the filter so you see all Primary/Basic/KG results
   const fetchPendingResults = async () => { 
     try { 
         let allData: any[] = [];
@@ -117,7 +116,6 @@ const HeadTeacherDashboard = () => {
     } catch (err) { console.error(err); } 
   };
   
-  // FIX: Unlocks the 1000 row limit AND fixes the filter for Approved Results
   const fetchApprovedResults = async () => { 
     try { 
         let allData: any[] = [];
@@ -167,13 +165,19 @@ const HeadTeacherDashboard = () => {
     if (allData.length > 0) {
       const studentsMap: any = {}; const subjectsSet = new Set<string>();
       const validData = allData.filter(r => !(r.ca1_score === 0 && r.ca2_score === 0 && r.exam_score === 0 && (r.class_quiz || 0) === 0 && (r.home_quiz || 0) === 0));
+      
       validData.forEach(row => {
         subjectsSet.add(row.subject);
         if (!studentsMap[row.student_id]) studentsMap[row.student_id] = { id: row.student_id, name: row.student_name, total: 0, subjectCount: 0, scores: {} };
-        studentsMap[row.student_id].scores[row.subject] = row.total_score;
-        studentsMap[row.student_id].total += row.total_score;
+        
+        // THE MATH FIX: Calculate True Total instantly, ignoring DB flaws!
+        const trueTotal = (Number(row.class_quiz) || 0) + (Number(row.home_quiz) || 0) + (Number(row.ca1_score) || 0) + (Number(row.ca2_score) || 0) + (Number(row.exam_score) || 0);
+
+        studentsMap[row.student_id].scores[row.subject] = trueTotal;
+        studentsMap[row.student_id].total += trueTotal;
         studentsMap[row.student_id].subjectCount += 1; 
       });
+      
       setBroadsheetSubjects(Array.from(subjectsSet));
       const processedData = Object.values(studentsMap).map((s: any) => ({ ...s, average: s.subjectCount > 0 ? Number((s.total / s.subjectCount).toFixed(1)) : 0 })).sort((a: any, b: any) => b.average - a.average);
       setBroadsheetData(processedData);
@@ -218,7 +222,6 @@ const HeadTeacherDashboard = () => {
 
   const initiateBatchAction = (action: 'approve' | 'reject') => setConfirmAction(action);
   
-  // FIX: Removed total_score update to prevent database crash
   const executeBatchAction = async () => {
     if (!selectedBatch || !confirmAction) return; 
     setLoading(true);
@@ -226,13 +229,9 @@ const HeadTeacherDashboard = () => {
       const status = confirmAction === 'approve' ? 'approved' : 'rejected';
       
       if (status === 'approved') {
-        for (const res of selectedBatch.results) {
-            const trueTotal = (Number(res.class_quiz) || 0) + (Number(res.home_quiz) || 0) + (Number(res.ca1_score) || 0) + (Number(res.ca2_score) || 0) + (Number(res.exam_score) || 0);
-            const { grade, remark } = calculateGradeAndRemarks(trueTotal, selectedBatch.class_level);
-            await supabase.from('results')
-              .update({ status: 'approved', grade: grade, remarks: remark })
-              .eq('id', res.id);
-        }
+        // Because of Supabase column constraints, we just update status and let it naturally flow!
+        const ids = selectedBatch.results.map(r => r.id);
+        await supabase.from('results').update({ status: status }).in('id', ids);
       } else {
         const ids = selectedBatch.results.map(r => r.id);
         await supabase.from('results').update({ status: status }).in('id', ids);
@@ -286,17 +285,14 @@ const HeadTeacherDashboard = () => {
     <div className="min-h-screen bg-slate-50 flex font-sans">
       <SEO title="Head Teacher | Citadel" description="Academic Admin" noindex={true} />
       
-      {/* CONFIRM PENDING ACTION MODAL */}
       {confirmAction && selectedBatch && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in"><div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 animate-in zoom-in-95"><div className={`w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-4 ${confirmAction === 'approve' ? 'bg-emerald-100 text-emerald-600' : 'bg-red-100 text-red-600'}`}>{confirmAction === 'approve' ? <CheckCircle size={28} /> : <AlertTriangle size={28} />}</div><h3 className="text-xl font-bold text-center text-gray-900 mb-2">{confirmAction === 'approve' ? 'Approve Results?' : 'Reject Results?'}</h3><p className="text-center text-gray-500 text-sm mb-6">Are you sure you want to <strong>{confirmAction.toUpperCase()}</strong> the {selectedBatch.subject} results?</p><div className="grid grid-cols-2 gap-3"><button onClick={() => setConfirmAction(null)} className="py-3 px-4 rounded-xl border border-gray-200 font-bold text-gray-600 hover:bg-gray-50">Cancel</button><button onClick={executeBatchAction} disabled={loading} className={`py-3 px-4 rounded-xl font-bold text-white shadow-lg flex items-center justify-center gap-2 ${confirmAction === 'approve' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-red-600 hover:bg-red-700'}`}>{loading ? 'Processing...' : `Yes, ${confirmAction === 'approve' ? 'Approve' : 'Reject'}`}</button></div></div></div>
       )}
 
-      {/* PENDING BATCH DETAIL MODAL */}
       {selectedBatch && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in"><div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95"><div className="bg-emerald-800 p-6 text-white flex justify-between items-center shrink-0"><div><h2 className="text-xl font-bold flex items-center gap-2">{selectedBatch.class_level} - {selectedBatch.subject}</h2><p className="text-emerald-200 text-sm">{selectedBatch.student_count} Students Submitted</p></div><button onClick={() => setSelectedBatch(null)} className="text-emerald-200 hover:text-white"><XCircle size={28}/></button></div><div className="flex-1 overflow-y-auto p-6 bg-gray-50"><div className="bg-white border rounded-xl shadow-sm overflow-x-auto"><table className="w-full text-left text-sm whitespace-nowrap"><thead className="bg-gray-100 text-gray-700 font-bold border-b"><tr><th className="p-4">Student Name</th><th className="p-4 text-center">CQ</th><th className="p-4 text-center">HQ</th><th className="p-4 text-center">1st CA</th><th className="p-4 text-center">2nd CA</th><th className="p-4 text-center">Exam</th><th className="p-4 text-center">Total</th><th className="p-4 text-center">Grade</th></tr></thead><tbody className="divide-y">{selectedBatch.results.map((res: any) => { const currentTotal = (Number(res.class_quiz) || 0) + (Number(res.home_quiz) || 0) + (Number(res.ca1_score) || 0) + (Number(res.ca2_score) || 0) + (Number(res.exam_score) || 0); const { grade } = calculateGradeAndRemarks(currentTotal, selectedBatch.class_level); return (<tr key={res.id} className="hover:bg-emerald-50/50"><td className="p-4 font-medium text-gray-900 sticky left-0 bg-white group-hover:bg-emerald-50/50">{res.student_name}</td><td className="p-4 text-center text-gray-600">{res.class_quiz || '-'}</td><td className="p-4 text-center text-gray-600">{res.home_quiz || '-'}</td><td className="p-4 text-center text-gray-600">{res.ca1_score || '-'}</td><td className="p-4 text-center text-gray-600">{res.ca2_score || '-'}</td><td className="p-4 text-center text-gray-600">{res.exam_score}</td><td className="p-4 text-center font-bold text-emerald-900">{currentTotal}</td><td className={`p-4 text-center font-bold ${currentTotal >= 50 ? 'text-green-600' : 'text-red-500'}`}>{grade}</td></tr>); })}</tbody></table></div><div className="mt-8 flex justify-end"><div className="text-right border-t-2 border-gray-300 pt-2 px-4"><p className="text-xs text-gray-500 uppercase font-bold tracking-widest">Uploaded By</p><p className="text-lg font-serif font-bold text-emerald-800">{selectedBatch.teacher_name}</p><p className="text-xs text-gray-400 italic">Subject Teacher</p></div></div></div><div className="p-6 bg-white border-t flex justify-end gap-4 shrink-0"><button onClick={() => initiateBatchAction('reject')} disabled={loading} className="px-6 py-3 bg-red-100 text-red-700 font-bold rounded-xl hover:bg-red-200 transition-colors">Reject Batch</button><button onClick={() => initiateBatchAction('approve')} disabled={loading} className="px-6 py-3 bg-emerald-700 text-white font-bold rounded-xl hover:bg-emerald-800 shadow-lg transition-all flex items-center gap-2"><CheckCircle size={18}/> Approve Batch</button></div></div></div>
       )}
 
-      {/* APPROVED BATCH DETAIL MODAL */}
       {selectedApprovedBatch && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in"><div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95"><div className="bg-emerald-600 p-6 text-white flex justify-between items-center shrink-0"><div><h2 className="text-xl font-bold flex items-center gap-2">{selectedApprovedBatch.class_level} - {selectedApprovedBatch.subject} <span className="bg-white text-emerald-700 text-xs px-2 py-0.5 rounded-full font-black">APPROVED</span></h2><p className="text-emerald-100 text-sm">{selectedApprovedBatch.student_count} Results Managed</p></div><button onClick={() => setSelectedApprovedBatch(null)} className="text-emerald-100 hover:text-white"><XCircle size={28}/></button></div><div className="flex-1 overflow-y-auto p-6 bg-gray-50"><div className="bg-white border rounded-xl shadow-sm overflow-x-auto"><table className="w-full text-left text-sm whitespace-nowrap"><thead className="bg-gray-100 text-gray-700 font-bold border-b"><tr><th className="p-4">Student Name</th><th className="p-4 text-center">CQ</th><th className="p-4 text-center">HQ</th><th className="p-4 text-center">1st CA</th><th className="p-4 text-center">2nd CA</th><th className="p-4 text-center">Exam</th><th className="p-4 text-center">Total</th><th className="p-4 text-center">Grade</th><th className="p-4 text-center">Action</th></tr></thead><tbody className="divide-y">{selectedApprovedBatch.results.map((res: any) => { const currentTotal = (Number(res.class_quiz) || 0) + (Number(res.home_quiz) || 0) + (Number(res.ca1_score) || 0) + (Number(res.ca2_score) || 0) + (Number(res.exam_score) || 0); const { grade } = calculateGradeAndRemarks(currentTotal, selectedApprovedBatch.class_level); return (<tr key={res.id} className="hover:bg-gray-50"><td className="p-4 font-medium text-gray-900 sticky left-0 bg-white">{res.student_name}</td><td className="p-4 text-center text-gray-600">{res.class_quiz || '-'}</td><td className="p-4 text-center text-gray-600">{res.home_quiz || '-'}</td><td className="p-4 text-center text-gray-600">{res.ca1_score || '-'}</td><td className="p-4 text-center text-gray-600">{res.ca2_score || '-'}</td><td className="p-4 text-center text-gray-600">{res.exam_score}</td><td className="p-4 text-center font-bold text-emerald-700">{currentTotal}</td><td className={`p-4 text-center font-bold ${currentTotal >= 50 ? 'text-green-600' : 'text-red-500'}`}>{grade}</td><td className="p-4 text-center"><button onClick={() => deleteSingleResult(res.id)} className="text-red-400 hover:text-red-600 hover:bg-red-50 p-2 rounded"><Trash2 size={16} /></button></td></tr>); })}</tbody></table></div></div><div className="p-6 bg-red-50 border-t border-red-100 flex justify-between items-center shrink-0"><p className="text-xs text-red-400 max-w-sm">Warning: Deleting the batch removes all results permanently.</p><button onClick={() => deleteBatchResults(selectedApprovedBatch)} disabled={loading} className="px-6 py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 shadow flex items-center gap-2"><Trash2 size={18}/> Delete Entire Batch</button></div></div></div>
       )}
