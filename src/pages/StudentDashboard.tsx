@@ -46,22 +46,31 @@ const StudentDashboard = () => {
     setLoading(true);
     const { data: resData } = await supabase.from('results').select('*').eq('student_id', studentId).eq('term', term).eq('session', session).eq('status', 'approved');
     const validResults = (resData || []).filter(r => !(r.ca1_score === 0 && r.ca2_score === 0 && r.exam_score === 0 && r.class_quiz === 0 && r.home_quiz === 0));
-    setResults(validResults);
     
-    // FIX: Using limit(1) safely grabs the remark without crashing from duplicates
+    // THE MATH FIX: Calculate the TRUE total on the fly directly from the individual scores!
+    const recalculatedResults = validResults.map(res => {
+        const trueTotal = (Number(res.class_quiz) || 0) + (Number(res.home_quiz) || 0) + (Number(res.ca1_score) || 0) + (Number(res.ca2_score) || 0) + (Number(res.exam_score) || 0);
+        return { ...res, computedTotal: trueTotal };
+    });
+    setResults(recalculatedResults);
+    
     const { data: repData } = await supabase.from('term_reports').select('*').eq('student_id', studentId).eq('term', term).eq('session', session).limit(1);
     setReportDetails(repData?.[0] || null);
 
     if (studentClass) {
-       const { data: allClassData } = await supabase.from('results').select('student_id, total_score')
+       // Fetching the raw scores for the whole class to ensure accurate rankings
+       const { data: allClassData } = await supabase.from('results').select('student_id, class_quiz, home_quiz, ca1_score, ca2_score, exam_score, total_score')
          .eq('class_level', studentClass).eq('term', term).eq('session', session).eq('status', 'approved');
        
        if (allClassData) {
          const studentStats: Record<string, { total: number, count: number }> = {};
          allClassData.forEach(r => {
-            if ((r.total_score || 0) > 0) { 
+            // Calculating TRUE totals for every student in the class for perfect rankings
+            const trueTotal = (Number(r.class_quiz) || 0) + (Number(r.home_quiz) || 0) + (Number(r.ca1_score) || 0) + (Number(r.ca2_score) || 0) + (Number(r.exam_score) || 0);
+            
+            if (trueTotal > 0) { 
                 if (!studentStats[r.student_id]) studentStats[r.student_id] = { total: 0, count: 0 };
-                studentStats[r.student_id].total += r.total_score;
+                studentStats[r.student_id].total += trueTotal;
                 studentStats[r.student_id].count += 1;
             }
          });
@@ -95,7 +104,8 @@ const StudentDashboard = () => {
     }
   };
 
-  const totalScore = results.reduce((acc, curr) => acc + curr.total_score, 0);
+  // Uses the perfectly computed total instead of the old database total
+  const totalScore = results.reduce((acc, curr) => acc + curr.computedTotal, 0);
   const averageScore = results.length > 0 ? Math.round(totalScore / results.length) : 0;
 
   const SidebarContent = () => ( <div className="h-full flex flex-col bg-[#FFD700] border-r-4 border-black"> <div className="p-8 text-center bg-[#FFD700]"> <div className="w-28 h-28 mx-auto rounded-full bg-white border-4 border-red-600 shadow-xl overflow-hidden flex items-center justify-center"> {studentProfile?.passport_url ? <img src={studentProfile.passport_url} className="w-full h-full object-cover"/> : <span className="text-5xl font-black text-red-600">{studentProfile?.full_name?.[0]}</span>} </div> <h3 className="font-black text-black text-xl mt-4 leading-tight">{studentProfile?.full_name}</h3> <span className="text-xs font-bold bg-black text-[#FFD700] px-4 py-1 rounded-full mt-2 inline-block uppercase tracking-widest shadow-sm"> {studentProfile?.current_class} </span> </div> <nav className="flex-1 p-4 space-y-3 mt-4"> <button onClick={() => { setActiveTab('result'); setIsMobileMenuOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-4 rounded-xl font-bold transition-all ${activeTab === 'result' ? 'bg-black text-[#FFD700] shadow-lg translate-x-2' : 'text-gray-900 hover:bg-yellow-300'}`}> <FileText size={20} /> Check Result </button> <button onClick={() => { setActiveTab('profile'); setIsMobileMenuOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-4 rounded-xl font-bold transition-all ${activeTab === 'profile' ? 'bg-black text-[#FFD700] shadow-lg translate-x-2' : 'text-gray-900 hover:bg-yellow-300'}`}> <User size={20} /> My Profile </button> </nav> <div className="p-6"> <button onClick={() => { localStorage.clear(); navigate('/'); }} className="w-full py-4 bg-red-600 text-white hover:bg-red-700 rounded-xl flex items-center justify-center gap-2 font-black shadow-lg transition-all uppercase tracking-wider"> <LogOut size={18} /> Logout </button> </div> </div> );
@@ -162,13 +172,15 @@ const StudentDashboard = () => {
                                 </thead>
                                 <tbody className="text-[9px] sm:text-[10px] md:text-xs print:text-[9px]">
                                    {results.map((res, i) => {
-                                     const { grade, remark } = getGradeAndRemark(res.total_score, studentProfile?.current_class);
+                                     // USES TRUE COMPUTED TOTAL INSTEAD OF RAW DB TOTAL
+                                     const trueTotal = res.computedTotal; 
+                                     const { grade, remark } = getGradeAndRemark(trueTotal, studentProfile?.current_class);
                                      const gradeColor = (grade === 'A' || grade === 'B') ? 'text-green-700' : (grade === 'C' || grade === 'D') ? 'text-yellow-600' : 'text-red-600';
                                      return (
                                        <tr key={i} className="even:bg-gray-50 border-b border-gray-300">
                                          <td className="p-1 print:py-0.5 text-center border-r border-gray-300 font-bold text-gray-500">{i + 1}</td> <td className="p-1 print:py-0.5 font-bold text-gray-900 border-r border-gray-300 uppercase truncate max-w-[120px]">{res.subject}</td>
                                          {!isSecondary && <td className="p-1 print:py-0.5 text-center font-medium border-r border-gray-300">{res.class_quiz || '-'}</td>} {!isSecondary && <td className="p-1 print:py-0.5 text-center font-medium border-r border-gray-300">{res.home_quiz || '-'}</td>}
-                                         <td className="p-1 print:py-0.5 text-center font-medium border-r border-gray-300">{res.ca1_score || '-'}</td> <td className="p-1 print:py-0.5 text-center font-medium border-r border-gray-300">{res.ca2_score || '-'}</td> <td className="p-1 print:py-0.5 text-center font-medium border-r border-gray-300">{res.exam_score || '-'}</td> <td className="p-1 print:py-0.5 text-center font-black border-r border-black bg-yellow-50">{res.total_score}</td> <td className={`p-1 print:py-0.5 text-center font-black border-r border-gray-300 ${gradeColor}`}>{grade}</td> <td className="p-1 print:py-0.5 text-center font-black border-r border-gray-300 text-green-700">{res.position || '-'}</td> <td className="p-1 print:py-0.5 text-center font-bold text-gray-600 uppercase tracking-wider truncate max-w-[80px]">{remark}</td>
+                                         <td className="p-1 print:py-0.5 text-center font-medium border-r border-gray-300">{res.ca1_score || '-'}</td> <td className="p-1 print:py-0.5 text-center font-medium border-r border-gray-300">{res.ca2_score || '-'}</td> <td className="p-1 print:py-0.5 text-center font-medium border-r border-gray-300">{res.exam_score || '-'}</td> <td className="p-1 print:py-0.5 text-center font-black border-r border-black bg-yellow-50">{trueTotal}</td> <td className={`p-1 print:py-0.5 text-center font-black border-r border-gray-300 ${gradeColor}`}>{grade}</td> <td className="p-1 print:py-0.5 text-center font-black border-r border-gray-300 text-green-700">{res.position || '-'}</td> <td className="p-1 print:py-0.5 text-center font-bold text-gray-600 uppercase tracking-wider truncate max-w-[80px]">{remark}</td>
                                        </tr>
                                      );
                                    })}
@@ -187,8 +199,7 @@ const StudentDashboard = () => {
                                <div className="flex-1 border-2 border-black"><div className="bg-gray-200 text-black font-bold p-1 print:py-0.5 text-center border-b-2 border-black uppercase text-[9px] sm:text-[10px] md:text-xs print:text-[9px] tracking-wider">Psychomotor Domain</div><div className="p-1">{PSYCHOMOTOR_KEYS.map(k => (<div key={k} className="flex justify-between text-[9px] sm:text-[11px] md:text-xs print:text-[9px] border-b border-gray-200 last:border-0 px-1 py-0.5 print:py-[1px]"><span className="uppercase text-gray-700">{k}</span> <span className="font-black">{reportDetails?.psychomotor_skills?.[k] || '-'}</span></div>))}</div><div className="p-1 text-[8px] sm:text-[9px] print:text-[7px] text-center border-t border-gray-300 text-gray-500 mt-1">Scale: 5-Excellent, 4-Very Good, 3-Good, 2-Fair, 1-Poor</div></div> <div className="flex-1 border-2 border-black"><div className="bg-gray-200 text-black font-bold p-1 print:py-0.5 text-center border-b-2 border-black uppercase text-[9px] sm:text-[10px] md:text-xs print:text-[9px] tracking-wider">Affective Domain</div><div className="p-1">{AFFECTIVE_KEYS.map(k => (<div key={k} className="flex justify-between text-[9px] sm:text-[11px] md:text-xs print:text-[9px] border-b border-gray-200 last:border-0 px-1 py-0.5 print:py-[1px]"><span className="uppercase text-gray-700">{k}</span> <span className="font-black">{reportDetails?.affective_skills?.[k] || '-'}</span></div>))}</div></div> 
                             </div>
                             
-                            {/* FIX: REMARK FALLBACK UPDATED SO YOU KNOW IF IT FAILED TO SAVE */}
-                            <div className="space-y-4 print:space-y-2 page-break-avoid border-2 border-black p-3 sm:p-4 print:p-2 text-xs sm:text-sm print:text-[10px] bg-yellow-50/50"> <div><span className="font-bold uppercase underline text-red-800">Class Teacher's Remark:</span><span className="ml-2 font-serif italic font-medium">"{reportDetails?.class_teacher_remark || 'No remark provided.'}"</span></div> <div className="pt-6 mt-4 print:pt-4 print:mt-2 flex justify-between items-end"><div className="text-center w-1/2 pr-2"><div className="w-full max-w-[160px] mx-auto border-b border-black mb-1"></div><span className="text-[8px] sm:text-[10px] print:text-[8px] font-bold uppercase tracking-widest text-gray-600 line-clamp-1">Class Teacher's Signature</span></div><div className="text-center w-1/2 pl-2"><div className="w-full max-w-[160px] mx-auto border-b border-black mb-1"></div><span className="text-[8px] sm:text-[10px] print:text-[8px] font-bold uppercase tracking-widest text-gray-600 line-clamp-1">Principal's Signature & Date</span></div></div> </div>
+                            <div className="space-y-4 print:space-y-2 page-break-avoid border-2 border-black p-3 sm:p-4 print:p-2 text-xs sm:text-sm print:text-[10px] bg-yellow-50/50"> <div><span className="font-bold uppercase underline text-red-800">Class Teacher's Remark:</span><span className="ml-2 font-serif italic font-medium">"{reportDetails?.class_teacher_remark || 'No remark provided.'}"</span></div> <div className="pt-6 mt-4 print:pt-4 print:mt-2 flex justify-between items-end"><div className="text-center w-1/2 pr-2"><div className="w-full max-w-[160px] mx-auto border-b border-black mb-1"></div><span className="text-[8px] sm:text-[10px] print:text-[8px] font-bold uppercase tracking-widest text-gray-600 line-clamp-1">Class Teacher's Signature</span></div><div className="text-center w-1/2 pl-2"><div className="w-full max-w-[160px] mx-auto border-b border-black mb-1"></div><span className="text-[8px] sm:text-[10px] print:text-[8px] font-bold uppercase tracking-widest text-gray-600 line-clamp-1">{isSecondary ? "Principal's Signature & Date" : "Head Teacher's Signature & Date"}</span></div></div> </div>
                         </div>
                     </div>
                   </div>
