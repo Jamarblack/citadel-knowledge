@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { LogOut, Upload, BookOpen, CheckCircle, X, Menu, Camera, Send, FileEdit } from "lucide-react";
+import { LogOut, Upload, BookOpen, CheckCircle, X, Menu, Camera, Send, FileEdit, RefreshCcw, AlertTriangle } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
@@ -29,6 +29,9 @@ const TeacherDashboard = () => {
   const [subjects, setSubjects] = useState<any[]>([]);
   const [reportData, setReportData] = useState<any>({ attendance: { open: 110, present: 0, absent: 0 }, psychomotor: {}, affective: {}, remark: "" });
   const [studentGrades, setStudentGrades] = useState<any[]>([]);
+  
+  // Custom Modal State
+  const [isClearModalOpen, setIsClearModalOpen] = useState(false);
 
   const isSecondary = uploadBaseClass.includes("JSS") || uploadBaseClass.includes("SS");
 
@@ -37,7 +40,24 @@ const TeacherDashboard = () => {
   const fetchProfile = async (id: string) => { const { data } = await supabase.from('staff').select('*').eq('id', id).single(); if (data) { setTeacherProfile(data); if (data.assigned_class) fetchMyClass(data.assigned_class); } };
   const fetchSubjects = async () => { const { data } = await supabase.from('subjects').select('*').order('name'); if (data) setSubjects(data); };
   const fetchMyClass = async (className: string) => { const { data } = await supabase.from('students').select('*').eq('current_class', className).order('full_name'); if (data) setMyClassStudents(data.filter(s => s.full_name && s.full_name.trim() !== "")); };
-  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => { if (!event.target.files?.length || !teacherProfile) return; setUploading(true); try { const file = event.target.files[0]; const filePath = `staff_${teacherProfile.id}_${Math.random()}.${file.name.split('.').pop()}`; await supabase.storage.from('passports').upload(filePath, file); const { data: { publicUrl } } = supabase.storage.from('passports').getPublicUrl(filePath); await supabase.from('staff').update({ passport_url: publicUrl }).eq('id', teacherProfile.id); setTeacherProfile({ ...teacherProfile, passport_url: publicUrl }); toast.success("Profile Photo Updated"); } catch (e: any) { toast.error("Upload failed"); } finally { setUploading(false); } };
+  
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => { 
+      if (!event.target.files?.length || !teacherProfile) return; 
+      setUploading(true); 
+      try { 
+          const file = event.target.files[0]; 
+          const filePath = `staff_${teacherProfile.id}_${Math.random()}.${file.name.split('.').pop()}`; 
+          await supabase.storage.from('passports').upload(filePath, file); 
+          const { data: { publicUrl } } = supabase.storage.from('passports').getPublicUrl(filePath); 
+          await supabase.from('staff').update({ passport_url: publicUrl }).eq('id', teacherProfile.id); 
+          setTeacherProfile({ ...teacherProfile, passport_url: publicUrl }); 
+          toast.success("Profile Photo Updated"); 
+      } catch (e: any) { 
+          toast.error("Upload failed"); 
+      } finally { 
+          setUploading(false); 
+      } 
+  };
 
   const calculateGradeAndRemarks = (totalScore: number, studentClass: string) => {
     const isSec = studentClass.includes("JSS") || studentClass.includes("SS");
@@ -104,6 +124,20 @@ const TeacherDashboard = () => {
     }));
   };
 
+  // --- NEW CLEAR SHEET FUNCTIONS ---
+  const handleClearSheet = () => {
+      setIsClearModalOpen(true);
+  };
+
+  const confirmClearSheet = () => {
+      const clearedEntries = scoreEntries.map(e => ({
+          ...e, class_quiz: '', home_quiz: '', ca1: '', ca2: '', exam: '', total: 0, grade: '', position: '-', status: 'new'
+      }));
+      setScoreEntries(clearedEntries);
+      toast.info("Sheet cleared. Don't forget to submit when you are done.");
+      setIsClearModalOpen(false); 
+  };
+
   const processUpload = async (targetStatus: 'draft' | 'pending') => {
     const fullClassName = uploadArm ? `${uploadBaseClass} ${uploadArm}` : uploadBaseClass;
     if (!uploadSubject || !fullClassName) return toast.error("Select Class & Subject");
@@ -150,7 +184,6 @@ const TeacherDashboard = () => {
           setStudentGrades([]);
       }
 
-      // FIX: Use .limit(1) instead of .maybeSingle() to bypass duplicate ghost crashes!
       const { data: existingReports } = await supabase.from('term_reports')
         .select('*').eq('student_id', student.id).eq('term', globalSettings.term).eq('session', globalSettings.session).limit(1); 
       
@@ -160,7 +193,6 @@ const TeacherDashboard = () => {
       else { setReportData({ attendance: { open: 110, present: 0, absent: 0 }, psychomotor: {}, affective: {}, remark: "" }); } 
   };
   
-  // FIX: Forceful check-then-update instead of Upsert to prevent DB Constraint failures!
   const saveReportDetails = async () => { 
       if (!selectedStudent) return; 
       setLoading(true); 
@@ -188,55 +220,168 @@ const TeacherDashboard = () => {
   
   const filteredSubjects = subjects.filter(sub => sub.section === 'General' || sub.section === (teacherProfile?.section || 'Secondary'));
 
-  const SidebarContent = () => ( <div className="h-full flex flex-col"> <div className="p-8 text-center bg-amber-50/50 border-b border-amber-100"> <div className="w-24 h-24 mx-auto rounded-full bg-amber-900 border-4 border-amber-100 relative group overflow-hidden"> {teacherProfile?.passport_url ? <img src={teacherProfile.passport_url} className="w-full h-full object-cover"/> : <span className="flex items-center justify-center h-full text-3xl font-bold text-white">{teacherProfile?.full_name?.[0] || 'T'}</span>} <label className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"><Camera className="text-white" size={24} /><input type="file" className="hidden" accept="image/*" onChange={handleFileUpload} disabled={uploading} /></label> </div> <h3 className="font-bold text-amber-950 mt-3 truncate px-2">{teacherProfile?.full_name || 'Staff Member'}</h3> <span className="text-xs font-bold text-amber-600 uppercase tracking-widest">{teacherProfile?.section} Teacher</span> </div> <nav className="flex-1 p-4 space-y-2"> <button onClick={() => {setActiveTab('my_class'); setIsMobileMenuOpen(false);}} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold transition-all ${activeTab === 'my_class' ? 'bg-amber-900 text-white shadow-lg' : 'text-gray-500 hover:bg-amber-50'}`}><BookOpen size={20} /> My Class</button> <button onClick={() => {setActiveTab('upload'); setIsMobileMenuOpen(false);}} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold transition-all ${activeTab === 'upload' ? 'bg-amber-900 text-white shadow-lg' : 'text-gray-500 hover:bg-amber-50'}`}><Upload size={20} /> Upload Results</button> </nav> <div className="p-4 border-t"><button onClick={() => { localStorage.clear(); navigate('/'); }} className="w-full py-3 text-red-600 font-bold hover:bg-red-50 rounded-xl flex items-center justify-center gap-2"><LogOut size={18} /> Sign Out</button></div> </div> );
+  const SidebarContent = () => ( 
+    <div className="h-full flex flex-col bg-white"> 
+        <div className="p-8 text-center bg-gray-50 border-b border-gray-100"> 
+            <div className="w-24 h-24 mx-auto rounded-full bg-indigo-900 border-4 border-indigo-50 relative group overflow-hidden shadow-sm"> 
+                {teacherProfile?.passport_url ? <img src={teacherProfile.passport_url} className="w-full h-full object-cover"/> : <span className="flex items-center justify-center h-full text-3xl font-bold text-white">{teacherProfile?.full_name?.[0] || 'T'}</span>} 
+                <label className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"><Camera className="text-white" size={24} /><input type="file" className="hidden" accept="image/*" onChange={handleFileUpload} disabled={uploading} /></label> 
+            </div> 
+            <h3 className="font-bold text-gray-900 mt-4 truncate px-2">{teacherProfile?.full_name || 'Staff Member'}</h3> 
+            <span className="text-xs font-bold text-indigo-600 uppercase tracking-widest bg-indigo-50 px-3 py-1 rounded-full mt-2 inline-block">{teacherProfile?.section} Teacher</span> 
+        </div> 
+        <nav className="flex-1 p-4 space-y-2"> 
+            <button onClick={() => {setActiveTab('my_class'); setIsMobileMenuOpen(false);}} className={`w-full flex items-center gap-3 px-4 py-3.5 rounded-xl font-bold transition-all ${activeTab === 'my_class' ? 'bg-indigo-900 text-white shadow-md' : 'text-gray-500 hover:bg-gray-50 hover:text-gray-900'}`}><BookOpen size={20} /> My Class</button> 
+            <button onClick={() => {setActiveTab('upload'); setIsMobileMenuOpen(false);}} className={`w-full flex items-center gap-3 px-4 py-3.5 rounded-xl font-bold transition-all ${activeTab === 'upload' ? 'bg-indigo-900 text-white shadow-md' : 'text-gray-500 hover:bg-gray-50 hover:text-gray-900'}`}><Upload size={20} /> Upload Results</button> 
+        </nav> 
+        <div className="p-4 border-t border-gray-100">
+            <button onClick={() => { localStorage.clear(); navigate('/'); }} className="w-full py-3.5 text-red-600 font-bold hover:bg-red-50 rounded-xl flex items-center justify-center gap-2 transition-colors"><LogOut size={18} /> Sign Out</button>
+        </div> 
+    </div> 
+  );
 
   return (
-    <div className="min-h-screen bg-[#f8f5f2] font-sans flex flex-col md:flex-row">
+    <div className="min-h-screen bg-gray-50/50 font-sans flex flex-col md:flex-row">
       <SEO title="Teacher Portal" description="Staff Area" noindex={true} />
-      <header className="md:hidden p-4 bg-white border-b border-amber-100 flex justify-between items-center sticky top-0 z-20"> <div className="flex items-center gap-2"><div className="w-8 h-8 rounded-full bg-amber-900 text-white flex items-center justify-center font-bold">{Logo ? <img src={Logo} alt="Logo" className="w-full h-full object-cover rounded-full" /> : (teacherProfile?.full_name?.[0] || 'T')}</div><span className="font-bold text-amber-950">Staff Portal</span></div> <button onClick={() => setIsMobileMenuOpen(true)} className="p-2 text-amber-900 bg-amber-50 rounded-lg"><Menu size={24} /></button> </header>
-      <aside className="hidden md:flex w-72 bg-white border-r border-amber-900/10 flex-col sticky top-0 h-screen z-30 shrink-0"><SidebarContent /></aside>
-      <Sheet open={isMobileMenuOpen} onOpenChange={setIsMobileMenuOpen}><SheetContent side="left" className="p-0 w-72 bg-white border-none"><SidebarContent /></SheetContent></Sheet>
+      
+      <header className="md:hidden p-4 bg-white border-b border-gray-200 flex justify-between items-center sticky top-0 z-20 shadow-sm"> 
+          <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-full bg-indigo-900 text-white flex items-center justify-center font-bold shadow-sm">{Logo ? <img src={Logo} alt="Logo" className="w-full h-full object-cover rounded-full" /> : (teacherProfile?.full_name?.[0] || 'T')}</div>
+              <span className="font-bold text-gray-900 tracking-tight">Staff Portal</span>
+          </div> 
+          <button onClick={() => setIsMobileMenuOpen(true)} className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"><Menu size={24} /></button> 
+      </header>
 
-      <main className="flex-1 h-[calc(100vh-65px)] md:h-screen overflow-y-auto">
-        <div className="p-6 md:p-10 max-w-6xl mx-auto">
-           {activeTab === 'my_class' && ( <div className="animate-in fade-in space-y-6"> <div className="flex justify-between items-center"> <div><h1 className="text-2xl font-bold text-amber-950">Manage Class: {teacherProfile?.assigned_class || 'No Class Assigned'}</h1><p className="text-gray-500 text-sm">Click on a student to enter Attendance, Remarks, and Skills.</p></div> </div> <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"> {myClassStudents.map(student => ( <div key={student.id} onClick={() => openStudentReport(student)} className="bg-white p-4 rounded-2xl border border-amber-100 shadow-sm hover:shadow-md cursor-pointer transition-all flex items-center gap-4 group"> <div className="w-16 h-16 rounded-full bg-amber-50 flex items-center justify-center text-amber-800 font-bold text-xl group-hover:bg-amber-900 group-hover:text-white transition-colors">{student?.full_name?.[0] || '?'}</div> <div><h3 className="font-bold text-gray-800">{student?.full_name || 'Unknown Student'}</h3><p className="text-xs text-gray-400 font-mono">{student?.admission_number || 'No ID'}</p></div> <div className="ml-auto text-amber-300 group-hover:text-amber-600"><CheckCircle size={20} /></div> </div> ))} {myClassStudents.length === 0 && ( <div className="col-span-full p-8 text-center text-gray-400 bg-white rounded-2xl border border-dashed border-gray-300"> <p>No students found in your class.</p> </div> )} </div> </div> )}
+      <aside className="hidden md:flex w-72 bg-white border-r border-gray-200 flex-col sticky top-0 h-screen z-30 shrink-0 shadow-sm"><SidebarContent /></aside>
+      
+      <Sheet open={isMobileMenuOpen} onOpenChange={setIsMobileMenuOpen}><SheetContent side="left" className="p-0 w-72 bg-white border-none shadow-2xl"><SidebarContent /></SheetContent></Sheet>
+
+      <main className="flex-1 h-[calc(100vh-73px)] md:h-screen overflow-y-auto">
+        <div className="p-4 md:p-8 lg:p-10 max-w-7xl mx-auto">
+           {/* MY CLASS TAB */}
+           {activeTab === 'my_class' && ( 
+               <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 space-y-6"> 
+                   <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-6 rounded-2xl shadow-sm border border-gray-100"> 
+                       <div>
+                           <h1 className="text-2xl md:text-3xl font-black text-gray-900 tracking-tight">Class: {teacherProfile?.assigned_class || 'Unassigned'}</h1>
+                           <p className="text-gray-500 text-sm mt-1">Select a student below to update their termly reports.</p>
+                       </div> 
+                   </div> 
+                   
+                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6"> 
+                       {myClassStudents.map(student => ( 
+                           <div key={student.id} onClick={() => openStudentReport(student)} className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm hover:shadow-md hover:border-indigo-100 cursor-pointer transition-all flex items-center gap-4 group"> 
+                               <div className="w-14 h-14 shrink-0 rounded-full bg-indigo-50 flex items-center justify-center text-indigo-700 font-bold text-xl group-hover:bg-indigo-600 group-hover:text-white transition-colors">{student?.full_name?.[0] || '?'}</div> 
+                               <div className="overflow-hidden">
+                                   <h3 className="font-bold text-gray-900 truncate">{student?.full_name || 'Unknown Student'}</h3>
+                                   <p className="text-xs text-gray-500 font-mono mt-0.5">{student?.admission_number || 'No ID'}</p>
+                               </div> 
+                               <div className="ml-auto text-gray-300 group-hover:text-green-500 transition-colors"><CheckCircle size={22} /></div> 
+                           </div> 
+                       ))} 
+                       {myClassStudents.length === 0 && ( 
+                           <div className="col-span-full p-12 text-center text-gray-400 bg-white rounded-2xl border border-dashed border-gray-300"> 
+                               <p className="font-medium">No students found in your assigned class.</p> 
+                           </div> 
+                       )} 
+                   </div> 
+               </div> 
+           )}
+
+           {/* UPLOAD RESULTS TAB */}
            {activeTab === 'upload' && (
-             <div className="animate-in fade-in space-y-6">
-                <h1 className="text-2xl font-bold text-amber-950">Subject Score Entry</h1>
-                <div className="bg-white p-6 rounded-2xl shadow-sm border border-amber-100 grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
-                    <div className="w-full"> <label className="text-xs font-bold text-gray-400 uppercase">1. Select Class</label> <select value={uploadBaseClass} onChange={(e) => { setUploadBaseClass(e.target.value); setUploadArm(""); setScoreEntries([]); }} className="w-full p-3 bg-gray-50 border rounded-xl font-bold focus:ring-2 focus:ring-amber-500 outline-none"> <option value="">-- Select Class --</option> {Object.keys(CLASS_ARMS).map(c => <option key={c} value={c}>{c}</option>)} </select> </div>
-                    {CLASS_ARMS[uploadBaseClass]?.length > 0 ? ( <div className="w-full animate-in zoom-in duration-300"> <label className="text-xs font-bold text-gray-500 uppercase flex items-center gap-1">2. Select Arm <div className="w-2 h-2 rounded-full bg-gray-500 animate-pulse"></div></label> <select value={uploadArm} onChange={(e) => { setUploadArm(e.target.value); if (uploadSubject) loadClassAndSubject(`${uploadBaseClass} ${e.target.value}`, uploadSubject); }} className="w-full p-3 bg-gray-50 border border-gray-200 text-gray-900 rounded-xl font-bold focus:ring-2 focus:ring-gray-500 outline-none"> <option value="">-- Select Arm --</option> {CLASS_ARMS[uploadBaseClass].map(a => <option key={a} value={a}>{a}</option>)} </select> </div> ) : ( <div className="w-full hidden md:block"></div> )}
-                    <div className="w-full"> <label className="text-xs font-bold text-gray-400 uppercase">3. Select Subject</label> <select value={uploadSubject} onChange={(e) => { setUploadSubject(e.target.value); const fullClassName = uploadArm ? `${uploadBaseClass} ${uploadArm}` : uploadBaseClass; loadClassAndSubject(fullClassName, e.target.value); }} disabled={!uploadBaseClass || (CLASS_ARMS[uploadBaseClass]?.length > 0 && !uploadArm)} className="w-full p-3 bg-gray-50 border rounded-xl font-bold disabled:opacity-50 focus:ring-2 focus:ring-amber-500 outline-none"> <option value="">-- Select Subject --</option> {filteredSubjects.map(s => <option key={s.id} value={s.name}>{s.name}</option>)} </select> </div>
+             <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 space-y-6">
+                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-2">
+                    <h1 className="text-2xl md:text-3xl font-black text-gray-900 tracking-tight">Score Entry</h1>
+                    <span className="bg-indigo-50 text-indigo-700 px-4 py-1.5 rounded-full text-sm font-bold border border-indigo-100">{globalSettings.term} - {globalSettings.session}</span>
+                </div>
+
+                <div className="bg-white p-5 md:p-6 rounded-2xl shadow-sm border border-gray-100 grid grid-cols-1 sm:grid-cols-3 gap-4 items-end">
+                    <div className="w-full"> 
+                        <label className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 block">1. Select Class</label> 
+                        <select value={uploadBaseClass} onChange={(e) => { setUploadBaseClass(e.target.value); setUploadArm(""); setScoreEntries([]); }} className="w-full p-3.5 bg-gray-50 border border-gray-200 rounded-xl font-bold focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all cursor-pointer"> 
+                            <option value="">-- Choose --</option> {Object.keys(CLASS_ARMS).map(c => <option key={c} value={c}>{c}</option>)} 
+                        </select> 
+                    </div>
+                    {CLASS_ARMS[uploadBaseClass]?.length > 0 ? ( 
+                        <div className="w-full animate-in zoom-in duration-300"> 
+                            <label className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 block">2. Select Arm</label> 
+                            <select value={uploadArm} onChange={(e) => { setUploadArm(e.target.value); if (uploadSubject) loadClassAndSubject(`${uploadBaseClass} ${e.target.value}`, uploadSubject); }} className="w-full p-3.5 bg-gray-50 border border-gray-200 text-gray-900 rounded-xl font-bold focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all cursor-pointer"> 
+                                <option value="">-- Choose --</option> {CLASS_ARMS[uploadBaseClass].map(a => <option key={a} value={a}>{a}</option>)} 
+                            </select> 
+                        </div> 
+                    ) : ( <div className="w-full hidden sm:block"></div> )}
+                    <div className="w-full"> 
+                        <label className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 block">3. Select Subject</label> 
+                        <select value={uploadSubject} onChange={(e) => { setUploadSubject(e.target.value); const fullClassName = uploadArm ? `${uploadBaseClass} ${uploadArm}` : uploadBaseClass; loadClassAndSubject(fullClassName, e.target.value); }} disabled={!uploadBaseClass || (CLASS_ARMS[uploadBaseClass]?.length > 0 && !uploadArm)} className="w-full p-3.5 bg-gray-50 border border-gray-200 rounded-xl font-bold disabled:opacity-50 disabled:cursor-not-allowed focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all cursor-pointer"> 
+                            <option value="">-- Choose --</option> {filteredSubjects.map(s => <option key={s.id} value={s.name}>{s.name}</option>)} 
+                        </select> 
+                    </div>
                 </div>
 
                 {scoreEntries.length > 0 && (
-                    <div className="bg-white rounded-2xl shadow-lg border border-amber-100 overflow-hidden">
-                        <div className="p-4 bg-amber-50 border-b border-amber-100 text-sm text-amber-800 font-medium flex justify-between items-center"> <span><strong>Tip:</strong> You can edit an approved result! Just hit <strong>Submit for Admin Approval</strong> to override old results.</span> </div>
+                    <div className="bg-white rounded-2xl shadow-md border border-gray-100 overflow-hidden flex flex-col">
+                        
+                        {/* Info Banner */}
+                        <div className="p-4 bg-blue-50 border-b border-blue-100 text-sm text-blue-800 flex items-start md:items-center gap-3"> 
+                            <AlertTriangle size={20} className="shrink-0 mt-0.5 md:mt-0" />
+                            <p><strong>Heads Up:</strong> To input scores for a fresh term, use the <strong className="text-red-600">Clear Sheet</strong> button below to wipe the slates clean before typing.</p>
+                        </div>
+
+                        {/* Responsive Table Wrapper */}
                         <div className="overflow-x-auto">
                             <table className="w-full text-left text-sm whitespace-nowrap">
-                                <thead className="bg-amber-950 text-white"> <tr> <th className="p-4">Student</th> {!isSecondary && <th className="p-4 w-20 text-center">Class Quiz</th>} {!isSecondary && <th className="p-4 w-20 text-center">Home Quiz</th>} <th className="p-4 w-20 text-center">1st CA</th> <th className="p-4 w-20 text-center">2nd CA</th> <th className="p-4 w-20 text-center">Exam</th> <th className="p-4 w-20 text-center text-amber-300">Total</th> <th className="p-4 w-20 text-center">Grade</th> <th className="p-4 w-32 text-center">Status</th> </tr> </thead>
-                                <tbody>
+                                <thead className="bg-gray-900 text-white"> 
+                                    <tr> 
+                                        <th className="p-4 font-bold tracking-wider uppercase text-xs">Student Name</th> 
+                                        {!isSecondary && <th className="p-4 w-24 text-center font-bold tracking-wider uppercase text-xs">Class Quiz</th>} 
+                                        {!isSecondary && <th className="p-4 w-24 text-center font-bold tracking-wider uppercase text-xs">Home Quiz</th>} 
+                                        <th className="p-4 w-24 text-center font-bold tracking-wider uppercase text-xs">1st CA</th> 
+                                        <th className="p-4 w-24 text-center font-bold tracking-wider uppercase text-xs">2nd CA</th> 
+                                        <th className="p-4 w-24 text-center font-bold tracking-wider uppercase text-xs">Exam</th> 
+                                        <th className="p-4 w-20 text-center text-indigo-300 font-black tracking-wider uppercase text-xs">Total</th> 
+                                        <th className="p-4 w-20 text-center font-bold tracking-wider uppercase text-xs">Grade</th> 
+                                        <th className="p-4 w-32 text-center font-bold tracking-wider uppercase text-xs">Status</th> 
+                                    </tr> 
+                                </thead>
+                                <tbody className="divide-y divide-gray-100">
                                   {scoreEntries.map((entry, i) => {
                                     const hasEntry = entry.class_quiz !== '' || entry.home_quiz !== '' || entry.ca1 !== '' || entry.ca2 !== '' || entry.exam !== '';
                                     const currentTotal = (Number(entry.class_quiz)||0) + (Number(entry.home_quiz)||0) + (Number(entry.ca1)||0) + (Number(entry.ca2)||0) + (Number(entry.exam)||0);
                                     return (
-                                      <tr key={entry.student_id} className="border-b hover:bg-gray-50">
-                                        <td className="p-4 font-bold text-gray-800 sticky left-0 bg-white group-hover:bg-gray-50 border-r border-gray-100 drop-shadow-sm">{entry.student_name || 'Unknown Student'}</td>
-                                        {!isSecondary && <td className="p-2 border-r border-gray-100"><input type="number" className="w-full p-2 bg-white border border-gray-200 rounded text-center focus:ring-2 focus:ring-amber-500 outline-none" value={entry.class_quiz} onChange={e => handleScoreChange(i, 'class_quiz', e.target.value)}/></td>}
-                                        {!isSecondary && <td className="p-2 border-r border-gray-100"><input type="number" className="w-full p-2 bg-white border border-gray-200 rounded text-center focus:ring-2 focus:ring-amber-500 outline-none" value={entry.home_quiz} onChange={e => handleScoreChange(i, 'home_quiz', e.target.value)}/></td>}
-                                        <td className="p-2 border-r border-gray-100"><input type="number" className="w-full p-2 bg-white border border-gray-200 rounded text-center focus:ring-2 focus:ring-amber-500 outline-none" value={entry.ca1} onChange={e => handleScoreChange(i, 'ca1', e.target.value)}/></td>
-                                        <td className="p-2 border-r border-gray-100"><input type="number" className="w-full p-2 bg-white border border-gray-200 rounded text-center focus:ring-2 focus:ring-amber-500 outline-none" value={entry.ca2} onChange={e => handleScoreChange(i, 'ca2', e.target.value)}/></td>
-                                        <td className="p-2 border-r border-gray-100"><input type="number" className="w-full p-2 bg-white border border-gray-200 rounded text-center font-bold text-blue-900 focus:ring-2 focus:ring-amber-500 outline-none" value={entry.exam} onChange={e => handleScoreChange(i, 'exam', e.target.value)}/></td>
-                                        <td className="p-4 text-center font-black text-amber-900 bg-amber-50 border-r border-gray-100">{ hasEntry ? currentTotal : '-' }</td>
-                                        <td className="p-4 text-center font-bold text-amber-600 border-r border-gray-100">{ hasEntry ? (entry.grade || '-') : '-' }</td>
-                                        <td className="p-4 text-center text-xs font-bold"> {entry.status === 'draft' && <span className="text-orange-500 bg-orange-50 px-2 py-1 rounded whitespace-nowrap">Draft Saved</span>} {entry.status === 'pending' && <span className="text-blue-500 bg-blue-50 px-2 py-1 rounded whitespace-nowrap">Pending Admin</span>} {entry.status === 'approved' && <span className="text-green-600 bg-green-50 px-2 py-1 rounded flex items-center justify-center gap-1 whitespace-nowrap"><CheckCircle size={12}/> Approved</span>} {entry.status === 'new' && <span className="text-gray-400">-</span>} </td>
+                                      <tr key={entry.student_id} className="hover:bg-gray-50 transition-colors">
+                                        <td className="p-4 font-bold text-gray-900 sticky left-0 bg-white group-hover:bg-gray-50 border-r border-gray-100 drop-shadow-sm min-w-[200px] truncate">{entry.student_name || 'Unknown Student'}</td>
+                                        {!isSecondary && <td className="p-2 border-r border-gray-50"><input type="number" className="w-full min-w-[60px] p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-center font-medium focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all" value={entry.class_quiz} onChange={e => handleScoreChange(i, 'class_quiz', e.target.value)}/></td>}
+                                        {!isSecondary && <td className="p-2 border-r border-gray-50"><input type="number" className="w-full min-w-[60px] p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-center font-medium focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all" value={entry.home_quiz} onChange={e => handleScoreChange(i, 'home_quiz', e.target.value)}/></td>}
+                                        <td className="p-2 border-r border-gray-50"><input type="number" className="w-full min-w-[60px] p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-center font-medium focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all" value={entry.ca1} onChange={e => handleScoreChange(i, 'ca1', e.target.value)}/></td>
+                                        <td className="p-2 border-r border-gray-50"><input type="number" className="w-full min-w-[60px] p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-center font-medium focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all" value={entry.ca2} onChange={e => handleScoreChange(i, 'ca2', e.target.value)}/></td>
+                                        <td className="p-2 border-r border-gray-50"><input type="number" className="w-full min-w-[60px] p-2.5 bg-blue-50/50 border border-blue-200 rounded-lg text-center font-black text-blue-900 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all" value={entry.exam} onChange={e => handleScoreChange(i, 'exam', e.target.value)}/></td>
+                                        <td className="p-4 text-center font-black text-indigo-900 bg-indigo-50/30 border-r border-gray-50">{ hasEntry ? currentTotal : '-' }</td>
+                                        <td className="p-4 text-center font-bold text-gray-600 border-r border-gray-50">{ hasEntry ? (entry.grade || '-') : '-' }</td>
+                                        <td className="p-4 text-center text-xs font-bold"> {entry.status === 'draft' && <span className="text-orange-600 bg-orange-100 px-2.5 py-1 rounded-md whitespace-nowrap">Draft Saved</span>} {entry.status === 'pending' && <span className="text-blue-600 bg-blue-100 px-2.5 py-1 rounded-md whitespace-nowrap">Pending Admin</span>} {entry.status === 'approved' && <span className="text-green-700 bg-green-100 px-2.5 py-1 rounded-md flex items-center justify-center gap-1.5 whitespace-nowrap"><CheckCircle size={14}/> Approved</span>} {entry.status === 'new' && <span className="text-gray-400">-</span>} </td>
                                       </tr>
                                     );
                                   })}
                                 </tbody>
                             </table>
                         </div>
-                        <div className="p-6 bg-gray-50 flex justify-end gap-4 border-t"> <button onClick={() => processUpload('draft')} disabled={loading} className="px-6 py-3 bg-white text-amber-900 border border-amber-900 font-bold rounded-xl shadow-sm hover:bg-amber-50 flex items-center gap-2 transition-all"> <FileEdit size={18}/> {loading ? 'Saving...' : 'Save as Draft'} </button> <button onClick={() => processUpload('pending')} disabled={loading} className="px-8 py-3 bg-amber-900 text-white font-bold rounded-xl shadow-lg hover:bg-amber-800 flex items-center gap-2 transition-all"> <Send size={18}/> {loading ? 'Submitting...' : 'Submit for Admin Approval'} </button> </div>
+
+                        {/* Action Footer */}
+                        <div className="p-4 md:p-6 bg-gray-50 flex flex-col md:flex-row justify-between items-center gap-4 border-t border-gray-200"> 
+                            
+                            <button onClick={handleClearSheet} className="w-full md:w-auto px-6 py-3.5 text-red-600 font-bold bg-white border border-red-200 rounded-xl hover:bg-red-50 flex items-center justify-center gap-2 transition-all shadow-sm order-2 md:order-1">
+                                <RefreshCcw size={18}/> Clear Sheet
+                            </button>
+
+                            <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto order-1 md:order-2">
+                                <button onClick={() => processUpload('draft')} disabled={loading} className="w-full sm:w-auto px-6 py-3.5 bg-white text-gray-700 border border-gray-300 font-bold rounded-xl shadow-sm hover:bg-gray-100 flex items-center justify-center gap-2 transition-all"> 
+                                    <FileEdit size={18}/> {loading ? 'Saving...' : 'Save as Draft'} 
+                                </button> 
+                                <button onClick={() => processUpload('pending')} disabled={loading} className="w-full sm:w-auto px-8 py-3.5 bg-indigo-600 text-white font-bold rounded-xl shadow-md shadow-indigo-600/20 hover:bg-indigo-700 flex items-center justify-center gap-2 transition-all"> 
+                                    <Send size={18}/> {loading ? 'Submitting...' : 'Submit to Admin'} 
+                                </button> 
+                            </div>
+                        </div>
                     </div>
                 )}
              </div>
@@ -244,8 +389,109 @@ const TeacherDashboard = () => {
         </div>
       </main>
 
+      {/* STUDENT REPORT MODAL */}
       {selectedStudent && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 overflow-y-auto"> <div className="bg-white w-full max-w-2xl rounded-3xl shadow-2xl overflow-hidden my-10 animate-in zoom-in-95"> <div className="bg-amber-50 p-6 flex justify-between items-center border-b border-amber-100"> <div><h2 className="text-xl font-bold text-amber-950">Report Card: {selectedStudent.full_name}</h2></div> <button onClick={() => setSelectedStudent(null)} className="p-2 hover:bg-white rounded-full"><X size={24}/></button> </div> <div className="p-6 space-y-6 h-[70vh] overflow-y-auto"> <div className="bg-gray-50 p-4 rounded-xl border"><h3 className="text-xs font-bold text-gray-400 uppercase mb-3">Academic Snapshot</h3><div className="grid grid-cols-2 gap-2">{studentGrades.map((g, i) => (<div key={i} className="flex justify-between text-sm p-2 bg-white rounded border"><span>{g.subject}</span><span className="font-bold">{g.total_score} ({g.grade})</span></div>))}</div></div> <div><h3 className="text-purple-700 font-bold mb-3">Attendance</h3><div className="grid grid-cols-3 gap-4"><div><label className="text-xs font-bold">Opened</label><input type="number" className="w-full p-2 border rounded-lg" value={reportData.attendance.open} onChange={e => setReportData({...reportData, attendance: {...reportData.attendance, open: e.target.value}})}/></div><div><label className="text-xs font-bold">Present</label><input type="number" className="w-full p-2 border rounded-lg" value={reportData.attendance.present} onChange={e => setReportData({...reportData, attendance: {...reportData.attendance, present: e.target.value}})}/></div><div><label className="text-xs font-bold">Absent</label><input type="number" className="w-full p-2 border rounded-lg" value={reportData.attendance.absent} onChange={e => setReportData({...reportData, attendance: {...reportData.attendance, absent: e.target.value}})}/></div></div></div> <div><h3 className="text-purple-700 font-bold mb-3">Psychomotor (1-5)</h3><div className="grid grid-cols-2 gap-4">{PSYCHOMOTOR_KEYS.map(k => (<div key={k}><label className="text-xs font-bold text-gray-500 uppercase">{k}</label><select className="w-full p-2 border rounded-lg" value={reportData.psychomotor[k]||""} onChange={e => setReportData({...reportData, psychomotor:{...reportData.psychomotor,[k]:e.target.value}})}><option value="">-</option>{[5,4,3,2,1].map(n=><option key={n} value={n}>{n}</option>)}</select></div>))}</div></div> <div><h3 className="text-purple-700 font-bold mb-3">Affective (1-5)</h3><div className="grid grid-cols-2 gap-4">{AFFECTIVE_KEYS.map(k => (<div key={k}><label className="text-xs font-bold text-gray-500 uppercase">{k}</label><select className="w-full p-2 border rounded-lg" value={reportData.affective[k]||""} onChange={e => setReportData({...reportData, affective:{...reportData.affective,[k]:e.target.value}})}><option value="">-</option>{[5,4,3,2,1].map(n=><option key={n} value={n}>{n}</option>)}</select></div>))}</div></div> <div><h3 className="text-purple-700 font-bold mb-3">Teacher's Remark</h3><textarea className="w-full p-3 border rounded-xl" rows={3} value={reportData.remark} onChange={e => setReportData({...reportData, remark: e.target.value})}></textarea></div> </div> <div className="p-4 border-t bg-gray-50"><button onClick={saveReportDetails} disabled={loading} className="w-full py-3 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-xl shadow-lg">{loading ? 'Saving...' : 'Save Report Details'}</button></div> </div> </div>
+        <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto"> 
+            <div className="bg-white w-full max-w-2xl rounded-[2rem] shadow-2xl overflow-hidden my-10 animate-in zoom-in-95 duration-200"> 
+                <div className="bg-gray-50 p-6 md:p-8 flex justify-between items-center border-b border-gray-100"> 
+                    <div>
+                        <h2 className="text-xl md:text-2xl font-black text-gray-900">Termly Report</h2>
+                        <p className="text-sm font-medium text-gray-500 mt-1">{selectedStudent.full_name}</p>
+                    </div> 
+                    <button onClick={() => setSelectedStudent(null)} className="p-2 text-gray-400 hover:text-gray-900 hover:bg-white rounded-full transition-colors"><X size={24}/></button> 
+                </div> 
+
+                <div className="p-6 md:p-8 space-y-8 h-[60vh] overflow-y-auto"> 
+                    {/* Snapshot */}
+                    <div className="bg-indigo-50/50 p-5 rounded-2xl border border-indigo-100/50">
+                        <h3 className="text-xs font-bold text-indigo-400 uppercase tracking-wider mb-4">Academic Snapshot</h3>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            {studentGrades.map((g, i) => (
+                                <div key={i} className="flex justify-between items-center text-sm p-3 bg-white rounded-xl border border-indigo-100 shadow-sm">
+                                    <span className="font-medium text-gray-700 truncate mr-2">{g.subject}</span>
+                                    <span className="font-black text-indigo-900 bg-indigo-50 px-2 py-0.5 rounded">{g.total_score} ({g.grade})</span>
+                                </div>
+                            ))}
+                        </div>
+                    </div> 
+
+                    {/* Attendance */}
+                    <div>
+                        <h3 className="text-gray-900 font-bold text-lg mb-4 flex items-center gap-2">Attendance Record</h3>
+                        <div className="grid grid-cols-3 gap-4">
+                            <div><label className="text-xs font-bold text-gray-500 uppercase mb-1.5 block">Opened</label><input type="number" className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-bold text-center" value={reportData.attendance.open} onChange={e => setReportData({...reportData, attendance: {...reportData.attendance, open: e.target.value}})}/></div>
+                            <div><label className="text-xs font-bold text-gray-500 uppercase mb-1.5 block">Present</label><input type="number" className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-bold text-center text-green-700" value={reportData.attendance.present} onChange={e => setReportData({...reportData, attendance: {...reportData.attendance, present: e.target.value}})}/></div>
+                            <div><label className="text-xs font-bold text-gray-500 uppercase mb-1.5 block">Absent</label><input type="number" className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-bold text-center text-red-600" value={reportData.attendance.absent} onChange={e => setReportData({...reportData, attendance: {...reportData.attendance, absent: e.target.value}})}/></div>
+                        </div>
+                    </div> 
+
+                    <hr className="border-gray-100" />
+
+                    {/* Skills */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                        <div>
+                            <h3 className="text-gray-900 font-bold text-lg mb-4">Psychomotor</h3>
+                            <div className="space-y-4">
+                                {PSYCHOMOTOR_KEYS.map(k => (
+                                    <div key={k} className="flex justify-between items-center">
+                                        <label className="text-sm font-semibold text-gray-600">{k}</label>
+                                        <select className="w-24 p-2 bg-gray-50 border border-gray-200 rounded-lg font-bold text-center focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none cursor-pointer" value={reportData.psychomotor[k]||""} onChange={e => setReportData({...reportData, psychomotor:{...reportData.psychomotor,[k]:e.target.value}})}><option value="">-</option>{[5,4,3,2,1].map(n=><option key={n} value={n}>{n}</option>)}</select>
+                                    </div>
+                                ))}
+                            </div>
+                        </div> 
+                        <div>
+                            <h3 className="text-gray-900 font-bold text-lg mb-4">Affective</h3>
+                            <div className="space-y-4">
+                                {AFFECTIVE_KEYS.map(k => (
+                                    <div key={k} className="flex justify-between items-center">
+                                        <label className="text-sm font-semibold text-gray-600">{k}</label>
+                                        <select className="w-24 p-2 bg-gray-50 border border-gray-200 rounded-lg font-bold text-center focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none cursor-pointer" value={reportData.affective[k]||""} onChange={e => setReportData({...reportData, affective:{...reportData.affective,[k]:e.target.value}})}><option value="">-</option>{[5,4,3,2,1].map(n=><option key={n} value={n}>{n}</option>)}</select>
+                                    </div>
+                                ))}
+                            </div>
+                        </div> 
+                    </div>
+
+                    <hr className="border-gray-100" />
+
+                    {/* Remarks */}
+                    <div>
+                        <h3 className="text-gray-900 font-bold text-lg mb-4">Teacher's Remark</h3>
+                        <textarea className="w-full p-4 bg-gray-50 border border-gray-200 rounded-2xl focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all resize-none" rows={4} placeholder="E.g. A brilliant performance this term..." value={reportData.remark} onChange={e => setReportData({...reportData, remark: e.target.value})}></textarea>
+                    </div> 
+                </div> 
+
+                <div className="p-6 md:p-8 bg-gray-50 border-t border-gray-100">
+                    <button onClick={saveReportDetails} disabled={loading} className="w-full py-4 bg-gray-900 hover:bg-black text-white font-bold rounded-xl shadow-lg transition-all">{loading ? 'Saving securely...' : 'Save Report Details'}</button>
+                </div> 
+            </div> 
+        </div>
+      )}
+
+      {/* CUSTOM CLEAR SHEET WARNING MODAL */}
+      {isClearModalOpen && (
+        <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-sm rounded-[2rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
+             <div className="p-6 md:p-8 text-center space-y-4">
+                <div className="w-20 h-20 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-2 border-[6px] border-red-100/50">
+                   <AlertTriangle size={36} className="text-red-600" />
+                </div>
+                <h3 className="text-2xl font-black text-gray-900">Clear Sheet?</h3>
+                <p className="text-gray-500 font-medium text-sm leading-relaxed">
+                  Are you sure you want to wipe all unsaved inputs? This gives you a fresh start.
+                </p>
+             </div>
+             <div className="p-5 bg-gray-50 border-t border-gray-100 flex gap-3">
+                <button onClick={() => setIsClearModalOpen(false)} className="flex-1 py-3.5 bg-white text-gray-700 font-bold border border-gray-200 rounded-xl hover:bg-gray-100 transition-all shadow-sm">
+                  Cancel
+                </button>
+                <button onClick={confirmClearSheet} className="flex-1 py-3.5 bg-red-600 text-white font-bold rounded-xl shadow-md shadow-red-600/20 hover:bg-red-700 transition-all">
+                  Yes, Clear It
+                </button>
+             </div>
+          </div>
+        </div>
       )}
     </div>
   );
