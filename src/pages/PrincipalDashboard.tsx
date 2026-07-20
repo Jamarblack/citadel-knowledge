@@ -75,17 +75,32 @@ const PrincipalDashboard = () => {
         setNewGlobalTerm(data.current_term);
     }
   };
+const updateGlobalSettings = async () => { 
+      if (!newGlobalSession || !newGlobalTerm) return toast.error("Please provide both session and term."); 
+      setLoading(true); 
 
-  const updateGlobalSettings = async () => {
-      if (!newGlobalSession || !newGlobalTerm) return toast.error("Please provide both session and term.");
-      setLoading(true);
-      const { error } = await supabase.from('school_settings').update({ current_session: newGlobalSession, current_term: newGlobalTerm }).eq('id', 1);
-      if (error) {
-          await supabase.from('school_settings').insert([{ id: 1, current_session: newGlobalSession, current_term: newGlobalTerm }]);
+      try {
+          // 1. Dynamically fetch the actual ID of your settings row
+          const { data: existingSettings } = await supabase.from('school_settings').select('id').limit(1).maybeSingle();
+
+          if (existingSettings?.id) {
+              // 2. Update using the real ID we just found
+              const { error } = await supabase.from('school_settings')
+                  .update({ current_session: newGlobalSession, current_term: newGlobalTerm })
+                  .eq('id', existingSettings.id);
+              if (error) throw error;
+          } else {
+              const { error } = await supabase.from('school_settings')
+                  .insert([{ current_session: newGlobalSession, current_term: newGlobalTerm }]);
+              if (error) throw error;
+          }
+          toast.success("Global Term & Session Updated!"); 
+          setGlobalSettings({ session: newGlobalSession, term: newGlobalTerm }); 
+      } catch (err: any) {
+          toast.error("Failed to update settings: " + err.message);
+      } finally {
+          setLoading(false); 
       }
-      toast.success("Global Term & Session Updated!");
-      setGlobalSettings({ session: newGlobalSession, term: newGlobalTerm });
-      setLoading(false);
   };
 
   const fetchUpdates = async () => {

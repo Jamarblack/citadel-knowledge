@@ -74,7 +74,35 @@ const HeadTeacherDashboard = () => {
 
   const fetchProfile = async (id: string) => { const { data } = await supabase.from('staff').select('*').eq('id', id).single(); if (data) setHeadProfile(data); };
   const fetchSettings = async () => { const { data } = await supabase.from('school_settings').select('*').single(); if (data) { setGlobalSettings({ session: data.current_session, term: data.current_term }); setNewGlobalSession(data.current_session); setNewGlobalTerm(data.current_term); } };
-  const updateGlobalSettings = async () => { if (!newGlobalSession || !newGlobalTerm) return toast.error("Please provide both session and term."); setLoading(true); const { error } = await supabase.from('school_settings').update({ current_session: newGlobalSession, current_term: newGlobalTerm }).eq('id', 1); if (error) { await supabase.from('school_settings').insert([{ id: 1, current_session: newGlobalSession, current_term: newGlobalTerm }]); } toast.success("Global Term & Session Updated!"); setGlobalSettings({ session: newGlobalSession, term: newGlobalTerm }); setLoading(false); };
+  
+  // FIX: Dynamic Settings Update to prevent "Ghost Update" Bug
+  const updateGlobalSettings = async () => { 
+      if (!newGlobalSession || !newGlobalTerm) return toast.error("Please provide both session and term."); 
+      setLoading(true); 
+
+      try {
+          const { data: existingSettings } = await supabase.from('school_settings').select('id').limit(1).maybeSingle();
+
+          if (existingSettings?.id) {
+              const { error } = await supabase.from('school_settings')
+                  .update({ current_session: newGlobalSession, current_term: newGlobalTerm })
+                  .eq('id', existingSettings.id);
+              if (error) throw error;
+          } else {
+              const { error } = await supabase.from('school_settings')
+                  .insert([{ current_session: newGlobalSession, current_term: newGlobalTerm }]);
+              if (error) throw error;
+          }
+
+          toast.success("Global Term & Session Updated!"); 
+          setGlobalSettings({ session: newGlobalSession, term: newGlobalTerm }); 
+      } catch (err: any) {
+          toast.error("Failed to update settings: " + err.message);
+      } finally {
+          setLoading(false); 
+      }
+  };
+
   const fetchUpdates = async () => { const { data } = await supabase.from('school_updates').select('*').order('event_date', { ascending: true }); if (data) setUpdates(data); };
   const postUpdate = async () => { if (!newUpdate.title || !newUpdate.event_date) return toast.error("Please fill all fields"); setLoading(true); await supabase.from('school_updates').insert([newUpdate]); setLoading(false); toast.success("Update Posted!"); setNewUpdate({ title: "", category: "Event", event_date: "" }); fetchUpdates(); };
   const deleteUpdate = async (id: string) => { await supabase.from('school_updates').delete().eq('id', id); toast.success("Update Removed"); fetchUpdates(); };
