@@ -12,10 +12,9 @@ const StaffDashboard = () => {
   const [activeTab, setActiveTab] = useState("profile");
   const [loading, setLoading] = useState(false);
   
-  // Logged-in Teacher's Profile
+
   const [teacherProfile, setTeacherProfile] = useState<any>(null);
 
-  // INPUT RESULT STATE
   const [selectedClass, setSelectedClass] = useState("");
   const [selectedDepartment, setSelectedDepartment] = useState("");
   const [selectedSubject, setSelectedSubject] = useState("");
@@ -24,14 +23,10 @@ const StaffDashboard = () => {
   const [filteredSubjects, setFilteredSubjects] = useState<any[]>([]);
   const [scores, setScores] = useState<Record<string, { ca: number, exam: number }>>({});
 
-  // MY CLASS STATE
+
   const [myClassStudents, setMyClassStudents] = useState<any[]>([]);
 
   useEffect(() => {
-    // 1. Get the current user
-    // Note: In a real app with Auth, use supabase.auth.getUser()
-    // For this manual setup, we fetch the teacher based on the email stored in localStorage
-    // OR for demo purposes, we fetch the last created 'Teacher' if no session exists.
     fetchTeacherProfile();
     fetchSubjects();
   }, []);
@@ -47,9 +42,6 @@ const StaffDashboard = () => {
   }, [selectedClass, selectedDepartment, subjects]);
 
   const fetchTeacherProfile = async () => {
-    // Ideally, retrieve email from login session. 
-    // Demo: Fetching a 'Teacher' role for demonstration.
-    // REPLACE THIS with actual session logic if you have implemented auth context.
     const { data } = await supabase.from('staff').select('*').eq('role', 'Teacher').limit(1).single();
     if (data) setTeacherProfile(data);
   };
@@ -69,7 +61,7 @@ const StaffDashboard = () => {
     setMyClassStudents(data || []);
   };
 
-  // --- LOGIC: Filter Classes based on Teacher's Section ---
+
   const getAllowedClasses = () => {
     if (!teacherProfile?.section) return [];
     
@@ -82,7 +74,7 @@ const StaffDashboard = () => {
     return [];
   };
 
-  // --- LOGIC: Filter Subjects (Same as before) ---
+
   const filterSubjects = () => {
     if (!selectedClass) { setFilteredSubjects([]); return; }
 
@@ -139,12 +131,12 @@ const StaffDashboard = () => {
         admission_number: student.admission_number,
         subject: selectedSubject,
         class_name: selectedClass,
-        term: '1st Term', // Should come from global settings
-        session: '2025/2026', // Should come from global settings
+        term: '1st Term',
+        session: '2025/2026', 
         ca_score: scoreData.ca,
         exam_score: scoreData.exam,
-        status: 'pending', // <--- IMPORTANT: Default to Pending
-        uploader_name: teacherProfile.full_name, // <--- Security Tracking
+        status: 'pending', 
+        uploader_name: teacherProfile.full_name, 
         uploader_id: teacherProfile.id
       }, { onConflict: 'student_id, subject, term, session' });
 

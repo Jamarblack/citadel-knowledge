@@ -17,14 +17,13 @@ const getOrdinal = (n: number) => {
   return s[(v - 20) % 10] || s[v] || s[0];
 };
 
-// THE SHIELD: Updated to perfectly match your database screenshot!
 const isExcludedFromTotal = (subject: string, className: string) => {
   const isSec = className?.includes("JSS") || className?.includes("SS");
-  if (isSec) return false; // Secondary school counts everything
+  if (isSec) return false; 
   
   const s = (subject || '').toLowerCase();
   return s.includes('drawing') || 
-         s.includes('writing') || // Added to match the DB exactly
+         s.includes('writing') || 
          s.includes('handwriting') || 
          s.includes('yoruba') || 
          s.includes('christian') || 
@@ -47,6 +46,7 @@ const StudentDashboard = () => {
   const [classPosition, setClassPosition] = useState({ rank: 0, outOf: 0 });
 
   const isSecondary = studentProfile?.current_class?.includes("JSS") || studentProfile?.current_class?.includes("SS");
+  const isAnnualReport = selectedTerm === "3rd Term" && isSecondary;
 
   useEffect(() => { const id = localStorage.getItem('studentId'); if (!id) navigate('/'); fetchInitialData(id!); }, []);
 
@@ -62,40 +62,60 @@ const StudentDashboard = () => {
 
   const fetchResults = async (studentId: string, term: string, session: string, studentClass: string) => {
     setLoading(true);
+    
+    // 1. Fetch current term results
     const { data: resData } = await supabase.from('results').select('*').eq('student_id', studentId).eq('term', term).eq('session', session).eq('status', 'approved');
     const validResults = (resData || []).filter(r => !(r.ca1_score === 0 && r.ca2_score === 0 && r.exam_score === 0 && r.class_quiz === 0 && r.home_quiz === 0));
     
+    // 2. If 3rd Term Secondary, fetch 1st & 2nd Term for cumulative calculation
+    let t1Map: Record<string, number> = {};
+    let t2Map: Record<string, number> = {};
+    
+    if (term === "3rd Term" && (studentClass.includes("JSS") || studentClass.includes("SS"))) {
+        const { data: t1 } = await supabase.from('results').select('subject, class_quiz, home_quiz, ca1_score, ca2_score, exam_score').eq('student_id', studentId).eq('term', '1st Term').eq('session', session).eq('status', 'approved');
+        const { data: t2 } = await supabase.from('results').select('subject, class_quiz, home_quiz, ca1_score, ca2_score, exam_score').eq('student_id', studentId).eq('term', '2nd Term').eq('session', session).eq('status', 'approved');
+        
+        t1?.forEach(r => t1Map[r.subject] = (Number(r.class_quiz)||0) + (Number(r.home_quiz)||0) + (Number(r.ca1_score)||0) + (Number(r.ca2_score)||0) + (Number(r.exam_score)||0));
+        t2?.forEach(r => t2Map[r.subject] = (Number(r.class_quiz)||0) + (Number(r.home_quiz)||0) + (Number(r.ca1_score)||0) + (Number(r.ca2_score)||0) + (Number(r.exam_score)||0));
+    }
+
     const recalculatedResults = validResults.map(res => {
         const trueTotal = (Number(res.class_quiz) || 0) + (Number(res.home_quiz) || 0) + (Number(res.ca1_score) || 0) + (Number(res.ca2_score) || 0) + (Number(res.exam_score) || 0);
-        return { ...res, computedTotal: trueTotal };
+        const t1Total = t1Map[res.subject] || 0;
+        const t2Total = t2Map[res.subject] || 0;
+        const cumTotal = t1Total + t2Total + trueTotal;
+        const cumAvg = Number((cumTotal / 3).toFixed(1));
+        
+        return { ...res, computedTotal: trueTotal, t1Total, t2Total, cumTotal, cumAvg };
     });
     setResults(recalculatedResults);
     
+    // 3. Fetch report details (attendance, remarks, etc)
     const { data: repData } = await supabase.from('term_reports').select('*').eq('student_id', studentId).eq('term', term).eq('session', session).limit(1);
     setReportDetails(repData?.[0] || null);
 
+    // 4. Class Position Logic (Cumulative ranking for 3rd Term Secondary!)
     if (studentClass) {
-       const { data: allClassData } = await supabase.from('results').select('student_id, subject, class_quiz, home_quiz, ca1_score, ca2_score, exam_score, total_score')
-         .eq('class_level', studentClass).eq('term', term).eq('session', session).eq('status', 'approved');
+       let allClassData;
+       if (term === "3rd Term" && (studentClass.includes("JSS") || studentClass.includes("SS"))) {
+           // Fetch ALL terms for the whole class to rank based on cumulative total
+           const { data } = await supabase.from('results').select('student_id, subject, class_quiz, home_quiz, ca1_score, ca2_score, exam_score').eq('class_level', studentClass).eq('session', session).eq('status', 'approved');
+           allClassData = data;
+       } else {
+           const { data } = await supabase.from('results').select('student_id, subject, class_quiz, home_quiz, ca1_score, ca2_score, exam_score').eq('class_level', studentClass).eq('term', term).eq('session', session).eq('status', 'approved');
+           allClassData = data;
+       }
        
        if (allClassData) {
-         const studentStats: Record<string, { total: number, count: number }> = {};
+         const studentStats: Record<string, { total: number }> = {};
          allClassData.forEach(r => {
             const trueTotal = (Number(r.class_quiz) || 0) + (Number(r.home_quiz) || 0) + (Number(r.ca1_score) || 0) + (Number(r.ca2_score) || 0) + (Number(r.exam_score) || 0);
-            
-            if (trueTotal > 0) { 
-                if (!studentStats[r.student_id]) studentStats[r.student_id] = { total: 0, count: 0 };
-                
-                if (!isExcludedFromTotal(r.subject, studentClass)) {
-                    studentStats[r.student_id].total += trueTotal;
-                    studentStats[r.student_id].count += 1;
-                }
+            if (trueTotal > 0 && !isExcludedFromTotal(r.subject, studentClass)) { 
+                if (!studentStats[r.student_id]) studentStats[r.student_id] = { total: 0 };
+                studentStats[r.student_id].total += trueTotal; // Ranks by total sum!
             }
          });
-         const ranked = Object.entries(studentStats).map(([id, stats]) => ({
-             id, avg: stats.count > 0 ? Number((stats.total / stats.count).toFixed(1)) : 0
-         })).sort((a, b) => b.avg - a.avg);
-         
+         const ranked = Object.entries(studentStats).map(([id, stats]) => ({ id, total: stats.total })).sort((a, b) => b.total - a.total);
          const myRankIndex = ranked.findIndex(r => r.id === studentId);
          setClassPosition({ rank: myRankIndex !== -1 ? myRankIndex + 1 : 0, outOf: ranked.length });
        }
@@ -103,28 +123,28 @@ const StudentDashboard = () => {
     setLoading(false);
   };
 
-  const getGradeAndRemark = (totalScore: number, studentClass: string = '') => {
+  const getGradeAndRemark = (score: number, studentClass: string = '') => {
     const isSec = studentClass.includes("JSS") || studentClass.includes("SS");
     if (isSec) {
-      if (totalScore >= 80) return { grade: 'A', remark: 'Excellent' };
-      if (totalScore >= 70) return { grade: 'B', remark: 'Very Good' };
-      if (totalScore >= 60) return { grade: 'C', remark: 'Good' };
-      if (totalScore >= 50) return { grade: 'D', remark: 'Average' };
-      if (totalScore >= 45) return { grade: 'E', remark: 'Pass' };
+      if (score >= 80) return { grade: 'A', remark: 'Excellent' };
+      if (score >= 70) return { grade: 'B', remark: 'Very Good' };
+      if (score >= 60) return { grade: 'C', remark: 'Good' };
+      if (score >= 50) return { grade: 'D', remark: 'Average' };
+      if (score >= 45) return { grade: 'E', remark: 'Pass' };
       return { grade: 'F', remark: 'Fail' };
     } else {
-      if (totalScore >= 80) return { grade: 'A', remark: 'Excellent' };
-      if (totalScore >= 70) return { grade: 'B', remark: 'V.Good' };
-      if (totalScore >= 60) return { grade: 'C', remark: 'Good' };
-      if (totalScore >= 50) return { grade: 'D', remark: 'Average' };
-      if (totalScore >= 40) return { grade: 'E', remark: 'Fair' };
+      if (score >= 80) return { grade: 'A', remark: 'Excellent' };
+      if (score >= 70) return { grade: 'B', remark: 'V.Good' };
+      if (score >= 60) return { grade: 'C', remark: 'Good' };
+      if (score >= 50) return { grade: 'D', remark: 'Average' };
+      if (score >= 40) return { grade: 'E', remark: 'Fair' };
       return { grade: 'F', remark: 'Fail' };
     }
   };
 
   const includedResults = results.filter(r => !isExcludedFromTotal(r.subject, studentProfile?.current_class || ''));
-  const totalScore = includedResults.reduce((acc, curr) => acc + curr.computedTotal, 0);
-  const averageScore = includedResults.length > 0 ? Math.round(totalScore / includedResults.length) : 0;
+  const overallTotal = includedResults.reduce((acc, curr) => acc + (isAnnualReport ? curr.cumTotal : curr.computedTotal), 0);
+  const overallAverage = includedResults.length > 0 ? (isAnnualReport ? Math.round((overallTotal / (includedResults.length * 3)) * 10) / 10 : Math.round(overallTotal / includedResults.length)) : 0;
 
   const SidebarContent = () => ( <div className="h-full flex flex-col bg-[#FFD700] border-r-4 border-black"> <div className="p-8 text-center bg-[#FFD700]"> <div className="w-28 h-28 mx-auto rounded-full bg-white border-4 border-red-600 shadow-xl overflow-hidden flex items-center justify-center"> {studentProfile?.passport_url ? <img src={studentProfile.passport_url} className="w-full h-full object-cover"/> : <span className="text-5xl font-black text-red-600">{studentProfile?.full_name?.[0]}</span>} </div> <h3 className="font-black text-black text-xl mt-4 leading-tight">{studentProfile?.full_name}</h3> <span className="text-xs font-bold bg-black text-[#FFD700] px-4 py-1 rounded-full mt-2 inline-block uppercase tracking-widest shadow-sm"> {studentProfile?.current_class} </span> </div> <nav className="flex-1 p-4 space-y-3 mt-4"> <button onClick={() => { setActiveTab('result'); setIsMobileMenuOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-4 rounded-xl font-bold transition-all ${activeTab === 'result' ? 'bg-black text-[#FFD700] shadow-lg translate-x-2' : 'text-gray-900 hover:bg-yellow-300'}`}> <FileText size={20} /> Check Result </button> <button onClick={() => { setActiveTab('profile'); setIsMobileMenuOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-4 rounded-xl font-bold transition-all ${activeTab === 'profile' ? 'bg-black text-[#FFD700] shadow-lg translate-x-2' : 'text-gray-900 hover:bg-yellow-300'}`}> <User size={20} /> My Profile </button> </nav> <div className="p-6"> <button onClick={() => { localStorage.clear(); navigate('/'); }} className="w-full py-4 bg-red-600 text-white hover:bg-red-700 rounded-xl flex items-center justify-center gap-2 font-black shadow-lg transition-all uppercase tracking-wider"> <LogOut size={18} /> Logout </button> </div> </div> );
 
@@ -156,6 +176,7 @@ const StudentDashboard = () => {
                             * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; } 
                             .print-hide { display: none !important; } 
                             .page-break-avoid { page-break-inside: avoid; } 
+                            .rotate-text { writing-mode: vertical-rl; transform: rotate(180deg); white-space: nowrap; }
                           }
                         `}</style>
 
@@ -168,7 +189,7 @@ const StudentDashboard = () => {
                                 <div className="w-16 h-20 sm:w-20 sm:h-24 print:w-10 print:h-12 border-2 border-gray-300 flex items-center justify-center bg-gray-50 shrink-0">{studentProfile?.passport_url ? <img src={studentProfile.passport_url} className="w-full h-full object-cover"/> : <span className="text-[8px] sm:text-[10px] print:text-[5px] text-gray-400 uppercase font-bold text-center px-1">Passport Photo</span>}</div> 
                             </div>
                             
-                            <div className="text-center bg-[#FFD700] text-black border-2 border-black py-1.5 print:py-0.5 mb-4 print:mb-1 font-black uppercase text-xs sm:text-sm md:text-base print:text-[9px] shadow-sm"> TERMLY REPORT SHEET - {selectedTerm} {selectedSession} </div>
+                            <div className="text-center bg-[#FFD700] text-black border-2 border-black py-1.5 print:py-0.5 mb-4 print:mb-1 font-black uppercase text-xs sm:text-sm md:text-base print:text-[9px] shadow-sm"> {isAnnualReport ? `TERMINAL REPORTS - ${selectedSession}` : `TERMLY REPORT SHEET - ${selectedTerm} ${selectedSession}`} </div>
                             
                             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2 print:gap-0.5 text-xs md:text-sm print:text-[8px] border-2 border-black p-3 print:p-1 mb-4 print:mb-1 font-medium"> 
                                 <div className="sm:col-span-2 flex"><span className="w-24 sm:w-28 print:w-16 font-bold text-gray-700 uppercase shrink-0">Name:</span> <span className="font-black border-b border-gray-400 flex-1 truncate">{studentProfile?.full_name}</span></div> 
@@ -180,42 +201,101 @@ const StudentDashboard = () => {
                             
                             <div className="overflow-x-auto border-2 border-black mb-4 print:mb-1">
                               <table className="w-full text-left border-collapse min-w-[500px]">
-                                <thead className="bg-red-700 text-white font-bold text-[8px] sm:text-[9px] md:text-[11px] print:text-[7px]">
-                                  <tr>
-                                    <th className="p-1 print:py-0.5 print:px-0.5 border border-black uppercase text-center w-6">S/N</th> <th className="p-1 print:py-0.5 print:px-0.5 border border-black uppercase w-32">SUBJECT</th>
-                                    {!isSecondary && <th className="p-1 print:py-0.5 print:px-0.5 text-center border border-black leading-tight">CLASS<br/>QUIZ</th>}
-                                    {!isSecondary && <th className="p-1 print:py-0.5 print:px-0.5 text-center border border-black leading-tight">HOME<br/>QUIZ</th>}
-                                    <th className="p-1 print:py-0.5 print:px-0.5 text-center border border-black leading-tight">1ST CA</th> <th className="p-1 print:py-0.5 print:px-0.5 text-center border border-black leading-tight">2ND CA</th> <th className="p-1 print:py-0.5 print:px-0.5 text-center border border-black leading-tight">EXAM</th> <th className="p-1 print:py-0.5 print:px-0.5 text-center border border-black text-[#FFD700]">TOTAL</th> <th className="p-1 print:py-0.5 print:px-0.5 text-center border border-black">GRADE</th> <th className="p-1 print:py-0.5 print:px-0.5 text-center border border-black text-[#FFD700]">POS</th> <th className="p-1 print:py-0.5 print:px-0.5 text-center border border-black">REMARK</th>
-                                  </tr>
-                                </thead>
+                                {isAnnualReport ? (
+                                  <thead className="bg-gray-100 text-black font-bold text-[7px] sm:text-[8px] md:text-[10px] print:text-[6.5px]">
+                                    <tr>
+                                      <th colSpan={2} className="border-r border-black p-1 text-center bg-white border-b border-black"></th>
+                                      <th colSpan={3} className="border border-black p-1 text-center uppercase tracking-widest">Third Term Work</th>
+                                      <th colSpan={8} className="border-l border-b border-black p-1 text-center uppercase tracking-widest">Summary of Session Work</th>
+                                    </tr>
+                                    <tr>
+                                      <th className="p-1 border border-black uppercase text-center w-6">S/N</th>
+                                      <th className="p-1 border border-black uppercase w-28">SUBJECTS</th>
+                                      <th className="p-1 text-center border border-black leading-tight"><div className="print:rotate-text">1st C.A.<br/>(20%)</div></th>
+                                      <th className="p-1 text-center border border-black leading-tight"><div className="print:rotate-text">2nd C.A.<br/>(20%)</div></th>
+                                      <th className="p-1 text-center border border-black leading-tight"><div className="print:rotate-text">Exam<br/>(60%)</div></th>
+                                      <th className="p-1 text-center border border-black leading-tight"><div className="print:rotate-text">1st Term<br/>Total</div></th>
+                                      <th className="p-1 text-center border border-black leading-tight"><div className="print:rotate-text">2nd Term<br/>Total</div></th>
+                                      <th className="p-1 text-center border border-black leading-tight"><div className="print:rotate-text">3rd Term<br/>Total</div></th>
+                                      <th className="p-1 text-center border border-black leading-tight"><div className="print:rotate-text">Total Mark<br/>Obtained</div></th>
+                                      <th className="p-1 text-center border border-black leading-tight"><div className="print:rotate-text">Average<br/>Mark</div></th>
+                                      <th className="p-1 text-center border border-black leading-tight"><div className="print:rotate-text">Position</div></th>
+                                      <th className="p-1 text-center border border-black leading-tight"><div className="print:rotate-text">Grade</div></th>
+                                      <th className="p-1 text-center border border-black">TEACHER'S<br/>REMARK</th>
+                                    </tr>
+                                  </thead>
+                                ) : (
+                                  <thead className="bg-red-700 text-white font-bold text-[8px] sm:text-[9px] md:text-[11px] print:text-[7px]">
+                                    <tr>
+                                      <th className="p-1 print:py-0.5 print:px-0.5 border border-black uppercase text-center w-6">S/N</th> <th className="p-1 print:py-0.5 print:px-0.5 border border-black uppercase w-32">SUBJECT</th>
+                                      {!isSecondary && <th className="p-1 print:py-0.5 print:px-0.5 text-center border border-black leading-tight">CLASS<br/>QUIZ</th>}
+                                      {!isSecondary && <th className="p-1 print:py-0.5 print:px-0.5 text-center border border-black leading-tight">HOME<br/>QUIZ</th>}
+                                      <th className="p-1 print:py-0.5 print:px-0.5 text-center border border-black leading-tight">1ST CA</th> <th className="p-1 print:py-0.5 print:px-0.5 text-center border border-black leading-tight">2ND CA</th> <th className="p-1 print:py-0.5 print:px-0.5 text-center border border-black leading-tight">EXAM</th> <th className="p-1 print:py-0.5 print:px-0.5 text-center border border-black text-[#FFD700]">TOTAL</th> <th className="p-1 print:py-0.5 print:px-0.5 text-center border border-black">GRADE</th> <th className="p-1 print:py-0.5 print:px-0.5 text-center border border-black text-[#FFD700]">POS</th> <th className="p-1 print:py-0.5 print:px-0.5 text-center border border-black">REMARK</th>
+                                    </tr>
+                                  </thead>
+                                )}
+
                                 <tbody className="text-[9px] sm:text-[10px] md:text-xs print:text-[8px]">
                                    {results.map((res, i) => {
-                                     const trueTotal = res.computedTotal; 
-                                     const { grade, remark } = getGradeAndRemark(trueTotal, studentProfile?.current_class);
+                                     const scoreForGrading = isAnnualReport ? res.cumAvg : res.computedTotal; 
+                                     const { grade, remark } = getGradeAndRemark(scoreForGrading, studentProfile?.current_class);
                                      const gradeColor = (grade === 'A' || grade === 'B') ? 'text-green-700' : (grade === 'C' || grade === 'D') ? 'text-yellow-600' : 'text-red-600';
-                                     
                                      const isExcluded = isExcludedFromTotal(res.subject, studentProfile?.current_class);
 
-                                     return (
-                                       <tr key={i} className={`border-b border-gray-300 ${isExcluded ? 'bg-orange-50/30' : 'even:bg-gray-50'}`}>
-                                         <td className="p-1 print:py-[1px] print:px-0.5 text-center border-r border-gray-300 font-bold text-gray-500">{i + 1}</td> 
-                                         <td className="p-1 print:py-[1px] print:px-0.5 font-bold text-gray-900 border-r border-gray-300 uppercase truncate max-w-[120px]">
-                                            {res.subject} {isExcluded && <span className="text-[6px] text-gray-400 ml-1 print:hidden">*</span>}
-                                         </td>
-                                         {!isSecondary && <td className="p-1 print:py-[1px] print:px-0.5 text-center font-medium border-r border-gray-300">{res.class_quiz || '-'}</td>} {!isSecondary && <td className="p-1 print:py-[1px] print:px-0.5 text-center font-medium border-r border-gray-300">{res.home_quiz || '-'}</td>}
-                                         <td className="p-1 print:py-[1px] print:px-0.5 text-center font-medium border-r border-gray-300">{res.ca1_score || '-'}</td> <td className="p-1 print:py-[1px] print:px-0.5 text-center font-medium border-r border-gray-300">{res.ca2_score || '-'}</td> <td className="p-1 print:py-[1px] print:px-0.5 text-center font-medium border-r border-gray-300">{res.exam_score || '-'}</td> <td className="p-1 print:py-[1px] print:px-0.5 text-center font-black border-r border-black bg-yellow-50">{trueTotal}</td> <td className={`p-1 print:py-[1px] print:px-0.5 text-center font-black border-r border-gray-300 ${gradeColor}`}>{grade}</td> <td className="p-1 print:py-[1px] print:px-0.5 text-center font-black border-r border-gray-300 text-green-700">{res.position || '-'}</td> <td className="p-1 print:py-[1px] print:px-0.5 text-center font-bold text-gray-600 uppercase tracking-wider truncate max-w-[80px]">{remark}</td>
-                                       </tr>
-                                     );
+                                     if (isAnnualReport) {
+                                        return (
+                                           <tr key={i} className={`border-b border-gray-300 ${isExcluded ? 'bg-orange-50/30' : 'even:bg-gray-50'}`}>
+                                             <td className="p-1 text-center border-r border-gray-300 font-bold text-gray-500">{i + 1}</td> 
+                                             <td className="p-1 font-bold text-gray-900 border-r border-gray-300 truncate max-w-[120px]">{res.subject}</td>
+                                             <td className="p-1 text-center font-medium border-r border-gray-300">{res.ca1_score || '-'}</td>
+                                             <td className="p-1 text-center font-medium border-r border-gray-300">{res.ca2_score || '-'}</td>
+                                             <td className="p-1 text-center font-medium border-r border-gray-300">{res.exam_score || '-'}</td>
+                                             <td className="p-1 text-center font-bold text-gray-600 border-r border-gray-300">{res.t1Total || '-'}</td>
+                                             <td className="p-1 text-center font-bold text-gray-600 border-r border-gray-300">{res.t2Total || '-'}</td>
+                                             <td className="p-1 text-center font-bold text-gray-600 border-r border-gray-300">{res.computedTotal || '-'}</td>
+                                             <td className="p-1 text-center font-black border-r border-gray-300 text-blue-900">{res.cumTotal}</td>
+                                             <td className="p-1 text-center font-black border-r border-black bg-yellow-50">{res.cumAvg}</td>
+                                             <td className="p-1 text-center font-black border-r border-gray-300 text-green-700">{res.position || '-'}</td>
+                                             <td className={`p-1 text-center font-black border-r border-gray-300 ${gradeColor}`}>{grade}</td>
+                                             <td className="p-1 text-center font-bold text-gray-600 uppercase truncate max-w-[80px]">{remark}</td>
+                                           </tr>
+                                        );
+                                     } else {
+                                        return (
+                                          <tr key={i} className={`border-b border-gray-300 ${isExcluded ? 'bg-orange-50/30' : 'even:bg-gray-50'}`}>
+                                            <td className="p-1 print:py-[1px] print:px-0.5 text-center border-r border-gray-300 font-bold text-gray-500">{i + 1}</td> 
+                                            <td className="p-1 print:py-[1px] print:px-0.5 font-bold text-gray-900 border-r border-gray-300 uppercase truncate max-w-[120px]">{res.subject} {isExcluded && <span className="text-[6px] text-gray-400 ml-1 print:hidden">*</span>}</td>
+                                            {!isSecondary && <td className="p-1 print:py-[1px] print:px-0.5 text-center font-medium border-r border-gray-300">{res.class_quiz || '-'}</td>} {!isSecondary && <td className="p-1 print:py-[1px] print:px-0.5 text-center font-medium border-r border-gray-300">{res.home_quiz || '-'}</td>}
+                                            <td className="p-1 print:py-[1px] print:px-0.5 text-center font-medium border-r border-gray-300">{res.ca1_score || '-'}</td> <td className="p-1 print:py-[1px] print:px-0.5 text-center font-medium border-r border-gray-300">{res.ca2_score || '-'}</td> <td className="p-1 print:py-[1px] print:px-0.5 text-center font-medium border-r border-gray-300">{res.exam_score || '-'}</td> <td className="p-1 print:py-[1px] print:px-0.5 text-center font-black border-r border-black bg-yellow-50">{res.computedTotal}</td> <td className={`p-1 print:py-[1px] print:px-0.5 text-center font-black border-r border-gray-300 ${gradeColor}`}>{grade}</td> <td className="p-1 print:py-[1px] print:px-0.5 text-center font-black border-r border-gray-300 text-green-700">{res.position || '-'}</td> <td className="p-1 print:py-[1px] print:px-0.5 text-center font-bold text-gray-600 uppercase tracking-wider truncate max-w-[80px]">{remark}</td>
+                                          </tr>
+                                        );
+                                     }
                                    })}
+                                   
+                                   {/* Overall Footer matching Screenshot */}
+                                   {isAnnualReport && (
+                                     <tr className="bg-gray-100 border-t-2 border-black font-black uppercase text-[8px] sm:text-[10px] print:text-[7px]">
+                                        <td colSpan={2} className="p-2 border-r border-black text-center">OVER-ALL<br/>(TOTAL)</td>
+                                        <td colSpan={6} className="p-2 border-r border-black text-center text-lg print:text-[10px]"><span className="border-b-2 border-black block">{overallTotal}</span><span className="block mt-0.5">{results.length * 300}</span></td>
+                                        <td colSpan={1} className="p-2 border-r border-black text-center">OVER-ALL<br/>(AVERAGE)</td>
+                                        <td colSpan={2} className="p-2 border-r border-black text-center text-lg print:text-sm text-blue-900">{overallAverage}%</td>
+                                        <td colSpan={1} className="p-2 border-r border-black text-center">OVER-ALL<br/>(GRADE)</td>
+                                        <td colSpan={1} className="p-2 text-center text-lg print:text-sm text-red-700">{getGradeAndRemark(overallAverage, studentProfile?.current_class).grade}</td>
+                                     </tr>
+                                   )}
                                 </tbody>
                               </table>
                             </div>
                             
                             <div className="flex flex-col md:flex-row gap-4 print:gap-1.5 mb-4 print:mb-1 page-break-avoid text-xs md:text-sm print:text-[8px]"> 
                                <div className="flex-1 space-y-4 print:space-y-1"> 
-                                  <div className="border-2 border-black flex"><div className="bg-red-700 text-white font-bold p-2 print:p-0.5 w-1/2 flex items-center uppercase text-[10px] sm:text-xs print:text-[7px]">Total Score</div><div className="p-2 print:p-0.5 font-black text-center flex-1">{totalScore}</div></div> 
-                                  <div className="border-2 border-black flex"><div className="bg-red-700 text-white font-bold p-2 print:p-0.5 w-1/2 flex items-center uppercase text-[10px] sm:text-xs print:text-[7px]">Overall Average</div><div className="p-2 print:p-0.5 font-black text-center flex-1 text-red-600 text-base sm:text-lg print:text-[10px]">{averageScore}%</div></div> 
-                                  <div className="border-2 border-black flex"><div className="bg-red-700 text-white font-bold p-2 print:p-0.5 w-1/2 flex items-center uppercase text-[10px] sm:text-xs print:text-[7px]">Position</div><div className="p-2 print:p-0.5 font-black text-center flex-1 text-blue-800 text-base sm:text-lg print:text-[10px]">{classPosition.rank ? `${classPosition.rank}${getOrdinal(classPosition.rank)} out of ${classPosition.outOf}` : '-'}</div></div> 
+                                  {!isAnnualReport && (
+                                    <>
+                                      <div className="border-2 border-black flex"><div className="bg-red-700 text-white font-bold p-2 print:p-0.5 w-1/2 flex items-center uppercase text-[10px] sm:text-xs print:text-[7px]">Total Score</div><div className="p-2 print:p-0.5 font-black text-center flex-1">{overallTotal}</div></div> 
+                                      <div className="border-2 border-black flex"><div className="bg-red-700 text-white font-bold p-2 print:p-0.5 w-1/2 flex items-center uppercase text-[10px] sm:text-xs print:text-[7px]">Overall Average</div><div className="p-2 print:p-0.5 font-black text-center flex-1 text-red-600 text-base sm:text-lg print:text-[10px]">{overallAverage}%</div></div> 
+                                    </>
+                                  )}
+                                  <div className="border-2 border-black flex"><div className="bg-gray-200 text-black font-bold p-2 print:p-0.5 w-1/2 flex items-center uppercase text-[10px] sm:text-xs print:text-[7px]">Position</div><div className="p-2 print:p-0.5 font-black text-center flex-1 text-blue-800 text-base sm:text-lg print:text-[10px]">{classPosition.rank ? `${classPosition.rank}${getOrdinal(classPosition.rank)} out of ${classPosition.outOf}` : '-'}</div></div> 
                                   
                                   <div className="border-2 border-black"><div className="bg-gray-200 text-black font-bold p-1 print:py-0.5 text-center border-b-2 border-black uppercase text-[10px] sm:text-xs print:text-[7px]">Attendance</div><div className="p-2 print:p-0.5 space-y-1 print:space-y-0 text-[10px] sm:text-xs print:text-[7px]"><div className="flex justify-between font-medium"><span>Days School Opened:</span> <span className="font-bold">{reportDetails?.days_school_open || '-'}</span></div><div className="flex justify-between font-medium"><span>Days Present:</span> <span className="font-bold">{reportDetails?.days_present || '-'}</span></div><div className="flex justify-between font-medium"><span>Days Absent:</span> <span className="font-bold">{reportDetails?.days_absent || '-'}</span></div></div></div> 
                                </div> 

@@ -30,10 +30,10 @@ const TeacherDashboard = () => {
   const [reportData, setReportData] = useState<any>({ attendance: { open: 110, present: 0, absent: 0 }, psychomotor: {}, affective: {}, remark: "" });
   const [studentGrades, setStudentGrades] = useState<any[]>([]);
   
-  // Custom Modal State
   const [isClearModalOpen, setIsClearModalOpen] = useState(false);
 
   const isSecondary = uploadBaseClass.includes("JSS") || uploadBaseClass.includes("SS");
+  const is3rdTermSecondary = isSecondary && globalSettings.term === "3rd Term";
 
   useEffect(() => { const id = localStorage.getItem('staffId'); if (!id) navigate('/'); fetchProfile(id!); fetchSubjects(); fetchSettings(); }, []);
   const fetchSettings = async () => { const { data } = await supabase.from('school_settings').select('*').single(); if (data) setGlobalSettings({ session: data.current_session, term: data.current_term }); };
@@ -95,13 +95,26 @@ const TeacherDashboard = () => {
         const ca2 = existing?.ca2_score !== null && existing?.ca2_score !== undefined ? existing.ca2_score : '';
         const exam = existing?.exam_score !== null && existing?.exam_score !== undefined ? existing.exam_score : '';
         
-        const total = (Number(cq)||0) + (Number(hq)||0) + (Number(ca1)||0) + (Number(ca2)||0) + (Number(exam)||0);
-        const hasEntry = cq !== '' || hq !== '' || ca1 !== '' || ca2 !== '' || exam !== '';
+        const t1Total = existing?.t1_total !== null && existing?.t1_total !== undefined ? existing.t1_total : '';
+        const t2Total = existing?.t2_total !== null && existing?.t2_total !== undefined ? existing.t2_total : '';
+
+        const term3Total = (Number(ca1)||0) + (Number(ca2)||0) + (Number(exam)||0);
+        const overallTotal = (fullClassName.includes("JSS") || fullClassName.includes("SS")) && globalSettings.term === "3rd Term" 
+            ? (Number(t1Total)||0) + (Number(t2Total)||0) + term3Total 
+            : (Number(cq)||0) + (Number(hq)||0) + term3Total;
+            
+        const gradingScore = (fullClassName.includes("JSS") || fullClassName.includes("SS")) && globalSettings.term === "3rd Term" 
+            ? Math.round((overallTotal / 3) * 10) / 10 
+            : overallTotal;
+
+        const hasEntry = ca1 !== '' || ca2 !== '' || exam !== '' || ((fullClassName.includes("JSS") || fullClassName.includes("SS")) && globalSettings.term === "3rd Term" && (t1Total !== '' || t2Total !== ''));
 
         return {
           student_id: student.id, student_name: student.full_name, admission_number: student.admission_number,
-          class_quiz: cq, home_quiz: hq, ca1: ca1, ca2: ca2, exam: exam, total: total,
-          grade: hasEntry ? calculateGradeAndRemarks(total, fullClassName).grade : '',
+          class_quiz: cq, home_quiz: hq, ca1: ca1, ca2: ca2, exam: exam, t1_total: t1Total, t2_total: t2Total, 
+          term3_total: term3Total,
+          total: gradingScore,
+          grade: hasEntry ? calculateGradeAndRemarks(gradingScore, fullClassName).grade : '',
           status: existing?.status || 'new', position: existing?.position || '-'
         };
       });
@@ -110,50 +123,64 @@ const TeacherDashboard = () => {
   };
 
   const handleScoreChange = (index: number, field: string, value: string) => {
-    const newEntries = [...scoreEntries]; newEntries[index][field] = value;
-    const withTotals = newEntries.map(e => ({ ...e, total: (Number(e.class_quiz)||0) + (Number(e.home_quiz)||0) + (Number(e.ca1)||0) + (Number(e.ca2)||0) + (Number(e.exam)||0) }));
-    const sorted = [...withTotals].sort((a,b) => b.total - a.total);
+    const newEntries = [...scoreEntries]; 
+    newEntries[index][field] = value;
+    
     const currentFullClass = uploadArm ? `${uploadBaseClass} ${uploadArm}` : uploadBaseClass;
+    const isSecClass = currentFullClass.includes("JSS") || currentFullClass.includes("SS");
+    const is3rdTerm = isSecClass && globalSettings.term === "3rd Term";
+
+    const withTotals = newEntries.map(e => {
+        const term3 = (Number(e.ca1)||0) + (Number(e.ca2)||0) + (Number(e.exam)||0);
+        const overall = is3rdTerm ? (Number(e.t1_total)||0) + (Number(e.t2_total)||0) + term3 : (Number(e.class_quiz)||0) + (Number(e.home_quiz)||0) + term3;
+        const gradingScore = is3rdTerm ? Math.round((overall / 3) * 10) / 10 : overall;
+        return { ...e, term3_total: term3, total: gradingScore };
+    });
+
+    const sorted = [...withTotals].sort((a,b) => b.total - a.total);
 
     setScoreEntries(withTotals.map(e => {
         const rank = sorted.findIndex(s => s.total === e.total) + 1;
         const s = ["th","st","nd","rd"], v = rank%100;
         const { grade } = calculateGradeAndRemarks(e.total, currentFullClass);
-        const hasEntry = e.class_quiz !== '' || e.home_quiz !== '' || e.ca1 !== '' || e.ca2 !== '' || e.exam !== '';
+        const hasEntry = e.ca1 !== '' || e.ca2 !== '' || e.exam !== '' || (is3rdTerm && (e.t1_total !== '' || e.t2_total !== ''));
         return { ...e, grade: hasEntry ? grade : '', position: hasEntry ? rank+(s[(v-20)%10]||s[v]||s[0]) : '-' };
     }));
   };
 
-  // --- NEW CLEAR SHEET FUNCTIONS ---
-  const handleClearSheet = () => {
-      setIsClearModalOpen(true);
-  };
+  const handleClearSheet = () => { setIsClearModalOpen(true); };
 
   const confirmClearSheet = () => {
       const clearedEntries = scoreEntries.map(e => ({
-          ...e, class_quiz: '', home_quiz: '', ca1: '', ca2: '', exam: '', total: 0, grade: '', position: '-', status: 'new'
+          ...e, class_quiz: '', home_quiz: '', ca1: '', ca2: '', exam: '', t1_total: '', t2_total: '', term3_total: 0, total: 0, grade: '', position: '-', status: 'new'
       }));
       setScoreEntries(clearedEntries);
-      toast.info("Sheet cleared. Don't forget to submit when you are done.");
+      toast.info("Sheet cleared.");
       setIsClearModalOpen(false); 
   };
 
   const processUpload = async (targetStatus: 'draft' | 'pending') => {
     const fullClassName = uploadArm ? `${uploadBaseClass} ${uploadArm}` : uploadBaseClass;
+    const isSecClass = fullClassName.includes("JSS") || fullClassName.includes("SS");
+    const is3rdTerm = isSecClass && globalSettings.term === "3rd Term";
+
     if (!uploadSubject || !fullClassName) return toast.error("Select Class & Subject");
-    const validEntries = scoreEntries.filter(e => e.class_quiz !== '' || e.home_quiz !== '' || e.ca1 !== '' || e.ca2 !== '' || e.exam !== '');
+    const validEntries = scoreEntries.filter(e => e.ca1 !== '' || e.ca2 !== '' || e.exam !== '' || (is3rdTerm && (e.t1_total !== '' || e.t2_total !== '')));
     if (validEntries.length === 0) return toast.error("No scores entered yet!");
 
     setLoading(true);
     try {
         const formatted = validEntries.map(e => {
-            const total = (Number(e.class_quiz)||0) + (Number(e.home_quiz)||0) + (Number(e.ca1)||0) + (Number(e.ca2)||0) + (Number(e.exam)||0);
-            const { grade, remark } = calculateGradeAndRemarks(total, fullClassName);
+            const term3 = (Number(e.ca1)||0) + (Number(e.ca2)||0) + (Number(e.exam)||0);
+            const overall = is3rdTerm ? (Number(e.t1_total)||0) + (Number(e.t2_total)||0) + term3 : (Number(e.class_quiz)||0) + (Number(e.home_quiz)||0) + term3;
+            const gradingScore = is3rdTerm ? Math.round((overall / 3) * 10) / 10 : overall;
+            const { grade, remark } = calculateGradeAndRemarks(gradingScore, fullClassName);
 
             return {
                 student_id: e.student_id, student_name: e.student_name, admission_number: e.admission_number, subject: uploadSubject, class_level: fullClassName, 
                 term: globalSettings.term, session: globalSettings.session, teacher_id: teacherProfile.id, teacher_name: teacherProfile.full_name,
                 class_quiz: Number(e.class_quiz) || 0, home_quiz: Number(e.home_quiz) || 0, ca1_score: Number(e.ca1) || 0, ca2_score: Number(e.ca2) || 0, exam_score: Number(e.exam) || 0,
+                t1_total: Number(e.t1_total) || 0, t2_total: Number(e.t2_total) || 0, total_score: overall,
                 grade: grade || 'F', position: e.position || '-', remarks: remark || 'Fail', status: targetStatus 
             };
         });
@@ -171,13 +198,15 @@ const TeacherDashboard = () => {
 
   const openStudentReport = async (student: any) => { 
       setSelectedStudent(student); 
-      const { data: rawGrades } = await supabase.from('results').select('subject, class_quiz, home_quiz, ca1_score, ca2_score, exam_score, class_level').eq('student_id', student.id).eq('term', globalSettings.term).eq('session', globalSettings.session); 
+      const { data: rawGrades } = await supabase.from('results').select('subject, class_quiz, home_quiz, ca1_score, ca2_score, exam_score, t1_total, t2_total, class_level').eq('student_id', student.id).eq('term', globalSettings.term).eq('session', globalSettings.session); 
       
       if (rawGrades) {
           const recalculatedGrades = rawGrades.map(g => {
-              const trueTotal = (Number(g.class_quiz)||0) + (Number(g.home_quiz)||0) + (Number(g.ca1_score)||0) + (Number(g.ca2_score)||0) + (Number(g.exam_score)||0);
-              const { grade } = calculateGradeAndRemarks(trueTotal, g.class_level || 'Pry');
-              return { subject: g.subject, total_score: trueTotal, grade: grade };
+              const term3 = (Number(g.ca1_score)||0) + (Number(g.ca2_score)||0) + (Number(g.exam_score)||0);
+              const overall = (g.t1_total !== undefined && g.t2_total !== undefined && globalSettings.term === '3rd Term') ? (Number(g.t1_total)||0) + (Number(g.t2_total)||0) + term3 : term3;
+              const gradingScore = (globalSettings.term === '3rd Term' && (g.class_level?.includes("JSS") || g.class_level?.includes("SS"))) ? Math.round((overall / 3) * 10) / 10 : overall;
+              const { grade } = calculateGradeAndRemarks(gradingScore, g.class_level || 'Pry');
+              return { subject: g.subject, total_score: gradingScore, grade: grade };
           });
           setStudentGrades(recalculatedGrades);
       } else {
@@ -258,7 +287,6 @@ const TeacherDashboard = () => {
 
       <main className="flex-1 h-[calc(100vh-73px)] md:h-screen overflow-y-auto">
         <div className="p-4 md:p-8 lg:p-10 max-w-7xl mx-auto">
-           {/* MY CLASS TAB */}
            {activeTab === 'my_class' && ( 
                <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 space-y-6"> 
                    <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-6 rounded-2xl shadow-sm border border-gray-100"> 
@@ -288,7 +316,6 @@ const TeacherDashboard = () => {
                </div> 
            )}
 
-           {/* UPLOAD RESULTS TAB */}
            {activeTab === 'upload' && (
              <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 space-y-6">
                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-2">
@@ -322,42 +349,45 @@ const TeacherDashboard = () => {
                 {scoreEntries.length > 0 && (
                     <div className="bg-white rounded-2xl shadow-md border border-gray-100 overflow-hidden flex flex-col">
                         
-                        {/* Info Banner */}
                         <div className="p-4 bg-blue-50 border-b border-blue-100 text-sm text-blue-800 flex items-start md:items-center gap-3"> 
                             <AlertTriangle size={20} className="shrink-0 mt-0.5 md:mt-0" />
                             <p><strong>Heads Up:</strong> To input scores for a fresh term, use the <strong className="text-red-600">Clear Sheet</strong> button below to wipe the slates clean before typing.</p>
                         </div>
 
-                        {/* Responsive Table Wrapper */}
                         <div className="overflow-x-auto">
                             <table className="w-full text-left text-sm whitespace-nowrap">
                                 <thead className="bg-gray-900 text-white"> 
                                     <tr> 
                                         <th className="p-4 font-bold tracking-wider uppercase text-xs">Student Name</th> 
-                                        {!isSecondary && <th className="p-4 w-24 text-center font-bold tracking-wider uppercase text-xs">Class Quiz</th>} 
-                                        {!isSecondary && <th className="p-4 w-24 text-center font-bold tracking-wider uppercase text-xs">Home Quiz</th>} 
-                                        <th className="p-4 w-24 text-center font-bold tracking-wider uppercase text-xs">1st CA</th> 
-                                        <th className="p-4 w-24 text-center font-bold tracking-wider uppercase text-xs">2nd CA</th> 
-                                        <th className="p-4 w-24 text-center font-bold tracking-wider uppercase text-xs">Exam</th> 
-                                        <th className="p-4 w-20 text-center text-indigo-300 font-black tracking-wider uppercase text-xs">Total</th> 
+                                        {is3rdTermSecondary && <th className="p-4 w-28 text-center font-bold tracking-wider uppercase text-xs bg-blue-900">1st Term</th>}
+                                        {is3rdTermSecondary && <th className="p-4 w-28 text-center font-bold tracking-wider uppercase text-xs bg-blue-900">2nd Term</th>}
+                                        <th className="p-4 w-24 text-center font-bold tracking-wider uppercase text-xs">3rd Term <br></br>1st CA</th> 
+                                        <th className="p-4 w-24 text-center font-bold tracking-wider uppercase text-xs">3rd term <br></br>2nd CA</th> 
+                                        <th className="p-4 w-24 text-center font-bold tracking-wider uppercase text-xs">3rd Term <br></br>Exam</th> 
+                                        {is3rdTermSecondary && <th className="p-4 w-24 text-center font-bold tracking-wider uppercase text-xs bg-gray-800">3rd Term <br></br>Total</th>}
+                                        <th className="p-4 w-24 text-center text-indigo-300 font-black tracking-wider uppercase text-xs">{is3rdTermSecondary ? 'Average' : 'Total'}</th> 
                                         <th className="p-4 w-20 text-center font-bold tracking-wider uppercase text-xs">Grade</th> 
                                         <th className="p-4 w-32 text-center font-bold tracking-wider uppercase text-xs">Status</th> 
                                     </tr> 
                                 </thead>
                                 <tbody className="divide-y divide-gray-100">
                                   {scoreEntries.map((entry, i) => {
-                                    const hasEntry = entry.class_quiz !== '' || entry.home_quiz !== '' || entry.ca1 !== '' || entry.ca2 !== '' || entry.exam !== '';
-                                    const currentTotal = (Number(entry.class_quiz)||0) + (Number(entry.home_quiz)||0) + (Number(entry.ca1)||0) + (Number(entry.ca2)||0) + (Number(entry.exam)||0);
+                                    const hasEntry = entry.ca1 !== '' || entry.ca2 !== '' || entry.exam !== '' || (is3rdTermSecondary && (entry.t1_total !== '' || entry.t2_total !== ''));
+                                    const { grade } = calculateGradeAndRemarks(entry.total, uploadArm ? `${uploadBaseClass} ${uploadArm}` : uploadBaseClass);
+                                    
                                     return (
                                       <tr key={entry.student_id} className="hover:bg-gray-50 transition-colors">
                                         <td className="p-4 font-bold text-gray-900 sticky left-0 bg-white group-hover:bg-gray-50 border-r border-gray-100 drop-shadow-sm min-w-[200px] truncate">{entry.student_name || 'Unknown Student'}</td>
-                                        {!isSecondary && <td className="p-2 border-r border-gray-50"><input type="number" className="w-full min-w-[60px] p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-center font-medium focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all" value={entry.class_quiz} onChange={e => handleScoreChange(i, 'class_quiz', e.target.value)}/></td>}
-                                        {!isSecondary && <td className="p-2 border-r border-gray-50"><input type="number" className="w-full min-w-[60px] p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-center font-medium focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all" value={entry.home_quiz} onChange={e => handleScoreChange(i, 'home_quiz', e.target.value)}/></td>}
+                                        
+                                        {is3rdTermSecondary && <td className="p-2 border-r border-gray-50"><input type="number" className="w-full min-w-[60px] p-2.5 bg-blue-50 border border-blue-200 rounded-lg text-center font-bold text-blue-900 outline-none" value={entry.t1_total} onChange={e => handleScoreChange(i, 't1_total', e.target.value)}/></td>}
+                                        {is3rdTermSecondary && <td className="p-2 border-r border-gray-50"><input type="number" className="w-full min-w-[60px] p-2.5 bg-blue-50 border border-blue-200 rounded-lg text-center font-bold text-blue-900 outline-none" value={entry.t2_total} onChange={e => handleScoreChange(i, 't2_total', e.target.value)}/></td>}
+
                                         <td className="p-2 border-r border-gray-50"><input type="number" className="w-full min-w-[60px] p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-center font-medium focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all" value={entry.ca1} onChange={e => handleScoreChange(i, 'ca1', e.target.value)}/></td>
                                         <td className="p-2 border-r border-gray-50"><input type="number" className="w-full min-w-[60px] p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-center font-medium focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all" value={entry.ca2} onChange={e => handleScoreChange(i, 'ca2', e.target.value)}/></td>
                                         <td className="p-2 border-r border-gray-50"><input type="number" className="w-full min-w-[60px] p-2.5 bg-blue-50/50 border border-blue-200 rounded-lg text-center font-black text-blue-900 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all" value={entry.exam} onChange={e => handleScoreChange(i, 'exam', e.target.value)}/></td>
-                                        <td className="p-4 text-center font-black text-indigo-900 bg-indigo-50/30 border-r border-gray-50">{ hasEntry ? currentTotal : '-' }</td>
-                                        <td className="p-4 text-center font-bold text-gray-600 border-r border-gray-50">{ hasEntry ? (entry.grade || '-') : '-' }</td>
+                                        {is3rdTermSecondary && <td className="p-4 text-center font-bold text-gray-700 bg-gray-100/60 border-r border-gray-50">{ hasEntry ? entry.term3_total : '-' }</td>}
+                                        <td className="p-4 text-center font-black text-indigo-900 bg-indigo-50/30 border-r border-gray-50">{ hasEntry ? entry.total : '-' }</td>
+                                        <td className="p-4 text-center font-bold text-gray-600 border-r border-gray-50">{ hasEntry ? (grade || '-') : '-' }</td>
                                         <td className="p-4 text-center text-xs font-bold"> {entry.status === 'draft' && <span className="text-orange-600 bg-orange-100 px-2.5 py-1 rounded-md whitespace-nowrap">Draft Saved</span>} {entry.status === 'pending' && <span className="text-blue-600 bg-blue-100 px-2.5 py-1 rounded-md whitespace-nowrap">Pending Admin</span>} {entry.status === 'approved' && <span className="text-green-700 bg-green-100 px-2.5 py-1 rounded-md flex items-center justify-center gap-1.5 whitespace-nowrap"><CheckCircle size={14}/> Approved</span>} {entry.status === 'new' && <span className="text-gray-400">-</span>} </td>
                                       </tr>
                                     );
@@ -366,9 +396,7 @@ const TeacherDashboard = () => {
                             </table>
                         </div>
 
-                        {/* Action Footer */}
                         <div className="p-4 md:p-6 bg-gray-50 flex flex-col md:flex-row justify-between items-center gap-4 border-t border-gray-200"> 
-                            
                             <button onClick={handleClearSheet} className="w-full md:w-auto px-6 py-3.5 text-red-600 font-bold bg-white border border-red-200 rounded-xl hover:bg-red-50 flex items-center justify-center gap-2 transition-all shadow-sm order-2 md:order-1">
                                 <RefreshCcw size={18}/> Clear Sheet
                             </button>
@@ -389,7 +417,6 @@ const TeacherDashboard = () => {
         </div>
       </main>
 
-      {/* STUDENT REPORT MODAL */}
       {selectedStudent && (
         <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto"> 
             <div className="bg-white w-full max-w-2xl rounded-[2rem] shadow-2xl overflow-hidden my-10 animate-in zoom-in-95 duration-200"> 
@@ -402,7 +429,6 @@ const TeacherDashboard = () => {
                 </div> 
 
                 <div className="p-6 md:p-8 space-y-8 h-[60vh] overflow-y-auto"> 
-                    {/* Snapshot */}
                     <div className="bg-indigo-50/50 p-5 rounded-2xl border border-indigo-100/50">
                         <h3 className="text-xs font-bold text-indigo-400 uppercase tracking-wider mb-4">Academic Snapshot</h3>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -415,7 +441,6 @@ const TeacherDashboard = () => {
                         </div>
                     </div> 
 
-                    {/* Attendance */}
                     <div>
                         <h3 className="text-gray-900 font-bold text-lg mb-4 flex items-center gap-2">Attendance Record</h3>
                         <div className="grid grid-cols-3 gap-4">
@@ -427,7 +452,6 @@ const TeacherDashboard = () => {
 
                     <hr className="border-gray-100" />
 
-                    {/* Skills */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                         <div>
                             <h3 className="text-gray-900 font-bold text-lg mb-4">Psychomotor</h3>
@@ -455,7 +479,6 @@ const TeacherDashboard = () => {
 
                     <hr className="border-gray-100" />
 
-                    {/* Remarks */}
                     <div>
                         <h3 className="text-gray-900 font-bold text-lg mb-4">Teacher's Remark</h3>
                         <textarea className="w-full p-4 bg-gray-50 border border-gray-200 rounded-2xl focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all resize-none" rows={4} placeholder="E.g. A brilliant performance this term..." value={reportData.remark} onChange={e => setReportData({...reportData, remark: e.target.value})}></textarea>
@@ -469,7 +492,6 @@ const TeacherDashboard = () => {
         </div>
       )}
 
-      {/* CUSTOM CLEAR SHEET WARNING MODAL */}
       {isClearModalOpen && (
         <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-sm rounded-[2rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
