@@ -78,9 +78,6 @@ const TeacherDashboard = () => {
     }
   };
 
-  // NOTE: `t1_total` / `t2_total` are NOT database columns. For a 3rd Term secondary
-  // subject, we compute the whole-year average by fetching the student's already-saved
-  // 1st Term and 2nd Term `total_score` from the `results` table itself, on the fly.
   const loadClassAndSubject = async (fullClassName: string, selectedSubject: string) => {
     if (!fullClassName || !selectedSubject) return;
     setLoading(true);
@@ -92,16 +89,6 @@ const TeacherDashboard = () => {
       if (!students) return;
 
       const { data: existingResults } = await supabase.from('results').select('*').eq('class_level', fullClassName).eq('subject', selectedSubject).eq('term', globalSettings.term).eq('session', globalSettings.session);
-
-      let firstTermResults: any[] = [];
-      let secondTermResults: any[] = [];
-      if (is3rdTerm) {
-        const { data: t1data } = await supabase.from('results').select('student_id, total_score').eq('class_level', fullClassName).eq('subject', selectedSubject).eq('term', '1st Term').eq('session', globalSettings.session);
-        const { data: t2data } = await supabase.from('results').select('student_id, total_score').eq('class_level', fullClassName).eq('subject', selectedSubject).eq('term', '2nd Term').eq('session', globalSettings.session);
-        firstTermResults = t1data || [];
-        secondTermResults = t2data || [];
-      }
-
       const validStudents = students.filter(s => s.full_name && s.full_name.trim() !== "");
 
       const mergedEntries = validStudents.map(student => {
@@ -112,8 +99,8 @@ const TeacherDashboard = () => {
         const ca2 = existing?.ca2_score !== null && existing?.ca2_score !== undefined ? existing.ca2_score : '';
         const exam = existing?.exam_score !== null && existing?.exam_score !== undefined ? existing.exam_score : '';
 
-        const t1Total = is3rdTerm ? (firstTermResults.find(r => r.student_id === student.id)?.total_score ?? 0) : 0;
-        const t2Total = is3rdTerm ? (secondTermResults.find(r => r.student_id === student.id)?.total_score ?? 0) : 0;
+        const t1Total = existing?.t1_total !== null && existing?.t1_total !== undefined ? existing.t1_total : '';
+        const t2Total = existing?.t2_total !== null && existing?.t2_total !== undefined ? existing.t2_total : '';
 
         const term3Total = (Number(ca1)||0) + (Number(ca2)||0) + (Number(exam)||0);
         const overallTotal = is3rdTerm
@@ -121,8 +108,7 @@ const TeacherDashboard = () => {
             : (Number(cq)||0) + (Number(hq)||0) + term3Total;
 
         const gradingScore = is3rdTerm ? Math.round((overallTotal / 3) * 10) / 10 : overallTotal;
-
-        const hasEntry = ca1 !== '' || ca2 !== '' || exam !== '' || cq !== '' || hq !== '';
+        const hasEntry = ca1 !== '' || ca2 !== '' || exam !== '' || cq !== '' || hq !== '' || (is3rdTerm && (t1Total !== '' || t2Total !== ''));
 
         return {
           student_id: student.id, student_name: student.full_name, admission_number: student.admission_number,
@@ -158,7 +144,7 @@ const TeacherDashboard = () => {
         const rank = sorted.findIndex(s => s.total === e.total) + 1;
         const s = ["th","st","nd","rd"], v = rank%100;
         const { grade } = calculateGradeAndRemarks(e.total, currentFullClass);
-        const hasEntry = e.ca1 !== '' || e.ca2 !== '' || e.exam !== '' || e.class_quiz !== '' || e.home_quiz !== '';
+        const hasEntry = e.ca1 !== '' || e.ca2 !== '' || e.exam !== '' || e.class_quiz !== '' || e.home_quiz !== '' || (is3rdTerm && (e.t1_total !== '' || e.t2_total !== ''));
         return { ...e, grade: hasEntry ? grade : '', position: hasEntry ? rank+(s[(v-20)%10]||s[v]||s[0]) : '-' };
     }));
   };
@@ -167,8 +153,7 @@ const TeacherDashboard = () => {
 
   const confirmClearSheet = () => {
       const clearedEntries = scoreEntries.map(e => ({
-          ...e, class_quiz: '', home_quiz: '', ca1: '', ca2: '', exam: '', term3_total: 0, total: 0, grade: '', position: '-', status: 'new'
-          // t1_total / t2_total are historical (read-only) and are intentionally left untouched
+          ...e, class_quiz: '', home_quiz: '', ca1: '', ca2: '', exam: '', t1_total: '', t2_total: '', term3_total: 0, total: 0, grade: '', position: '-', status: 'new'
       }));
       setScoreEntries(clearedEntries);
       toast.info("Sheet cleared.");
@@ -181,7 +166,7 @@ const TeacherDashboard = () => {
     const is3rdTerm = isSecClass && globalSettings.term === "3rd Term";
 
     if (!uploadSubject || !fullClassName) return toast.error("Select Class & Subject");
-    const validEntries = scoreEntries.filter(e => e.ca1 !== '' || e.ca2 !== '' || e.exam !== '' || e.class_quiz !== '' || e.home_quiz !== '');
+    const validEntries = scoreEntries.filter(e => e.ca1 !== '' || e.ca2 !== '' || e.exam !== '' || e.class_quiz !== '' || e.home_quiz !== '' || (is3rdTerm && (e.t1_total !== '' || e.t2_total !== '')));
     if (validEntries.length === 0) return toast.error("No scores entered yet!");
 
     setLoading(true);
@@ -192,14 +177,12 @@ const TeacherDashboard = () => {
             const gradingScore = is3rdTerm ? Math.round((overall / 3) * 10) / 10 : overall;
             const { grade, remark } = calculateGradeAndRemarks(gradingScore, fullClassName);
 
-            // IMPORTANT: only columns that exist on `results` are sent to Supabase.
-            // t1_total / t2_total are NOT real columns — they're derived on read from
-            // that student's saved 1st/2nd Term rows, so they must never be inserted.
             return {
                 student_id: e.student_id, student_name: e.student_name, admission_number: e.admission_number, subject: uploadSubject, class_level: fullClassName, 
                 term: globalSettings.term, session: globalSettings.session, teacher_id: teacherProfile.id, teacher_name: teacherProfile.full_name,
                 class_quiz: Number(e.class_quiz) || 0, home_quiz: Number(e.home_quiz) || 0, ca1_score: Number(e.ca1) || 0, ca2_score: Number(e.ca2) || 0, exam_score: Number(e.exam) || 0,
-                total_score: gradingScore,
+                t1_total: Number(e.t1_total) || 0, 
+                t2_total: Number(e.t2_total) || 0,
                 grade: grade || 'F', position: e.position || '-', remarks: remark || 'Fail', status: targetStatus 
             };
         });
@@ -217,10 +200,19 @@ const TeacherDashboard = () => {
 
   const openStudentReport = async (student: any) => { 
       setSelectedStudent(student); 
-      // total_score / grade are already fully computed and stored at upload time,
-      // so we just read them back — no need to touch non-existent columns like t1_total.
-      const { data: rawGrades } = await supabase.from('results').select('subject, total_score, grade').eq('student_id', student.id).eq('term', globalSettings.term).eq('session', globalSettings.session); 
-      setStudentGrades(rawGrades || []);
+      const { data: rawGrades } = await supabase.from('results').select('subject, class_quiz, home_quiz, ca1_score, ca2_score, exam_score, class_level').eq('student_id', student.id).eq('term', globalSettings.term).eq('session', globalSettings.session); 
+      
+      if (rawGrades) {
+          const recalculatedGrades = rawGrades.map(g => {
+              const term3 = (Number(g.ca1_score)||0) + (Number(g.ca2_score)||0) + (Number(g.exam_score)||0);
+              const overall = (g.class_level?.includes("JSS") || g.class_level?.includes("SS")) && globalSettings.term === '3rd Term' ? term3 : (Number(g.class_quiz)||0) + (Number(g.home_quiz)||0) + term3;
+              const { grade } = calculateGradeAndRemarks(overall, g.class_level || 'Pry');
+              return { subject: g.subject, total_score: overall, grade: grade };
+          });
+          setStudentGrades(recalculatedGrades);
+      } else {
+          setStudentGrades([]);
+      }
 
       const { data: existingReports } = await supabase.from('term_reports')
         .select('*').eq('student_id', student.id).eq('term', globalSettings.term).eq('session', globalSettings.session).limit(1); 
@@ -373,10 +365,10 @@ const TeacherDashboard = () => {
                                           <>
                                             <th className="p-4 w-28 text-center font-bold tracking-wider uppercase text-xs bg-blue-900">1st Term</th>
                                             <th className="p-4 w-28 text-center font-bold tracking-wider uppercase text-xs bg-blue-900">2nd Term</th>
-                                            <th className="p-4 w-24 text-center font-bold tracking-wider uppercase text-xs">3rd Term <br></br>1st CA</th> 
-                                            <th className="p-4 w-24 text-center font-bold tracking-wider uppercase text-xs">3rd Term <br></br>2nd CA</th> 
-                                            <th className="p-4 w-24 text-center font-bold tracking-wider uppercase text-xs">3rd Term <br></br>Exam</th> 
-                                            <th className="p-4 w-24 text-center font-bold tracking-wider uppercase text-xs bg-gray-800">3rd Term <br></br>Total</th>
+                                            <th className="p-4 w-24 text-center font-bold tracking-wider uppercase text-xs">3rd Term <br/>1st CA</th> 
+                                            <th className="p-4 w-24 text-center font-bold tracking-wider uppercase text-xs">3rd Term <br/>2nd CA</th> 
+                                            <th className="p-4 w-24 text-center font-bold tracking-wider uppercase text-xs">3rd Term <br/>Exam</th> 
+                                            <th className="p-4 w-24 text-center font-bold tracking-wider uppercase text-xs bg-gray-800">3rd Term <br/>Total</th>
                                           </>
                                         ) : (
                                           <>
@@ -395,7 +387,7 @@ const TeacherDashboard = () => {
                                 </thead>
                                 <tbody className="divide-y divide-gray-100">
                                   {scoreEntries.map((entry, i) => {
-                                    const hasEntry = entry.ca1 !== '' || entry.ca2 !== '' || entry.exam !== '' || entry.class_quiz !== '' || entry.home_quiz !== '';
+                                    const hasEntry = entry.ca1 !== '' || entry.ca2 !== '' || entry.exam !== '' || entry.class_quiz !== '' || entry.home_quiz !== '' || (is3rdTermSecondary && (entry.t1_total !== '' || entry.t2_total !== ''));
                                     const { grade } = calculateGradeAndRemarks(entry.total, uploadArm ? `${uploadBaseClass} ${uploadArm}` : uploadBaseClass);
                                     
                                     return (
@@ -404,8 +396,9 @@ const TeacherDashboard = () => {
                                         
                                         {is3rdTermSecondary ? (
                                           <>
-                                            <td className="p-4 text-center font-bold text-blue-900 bg-blue-50/60 border-r border-gray-50">{entry.t1_total || 0}</td>
-                                            <td className="p-4 text-center font-bold text-blue-900 bg-blue-50/60 border-r border-gray-50">{entry.t2_total || 0}</td>
+                                            {/* EDITABLE 1st & 2nd Term Inputs */}
+                                            <td className="p-2 border-r border-gray-50"><input type="number" className="w-full min-w-[60px] p-2.5 bg-blue-50 border border-blue-200 rounded-lg text-center font-bold text-blue-900 outline-none focus:bg-white focus:ring-2 focus:ring-indigo-500 transition-all" value={entry.t1_total} onChange={e => handleScoreChange(i, 't1_total', e.target.value)}/></td>
+                                            <td className="p-2 border-r border-gray-50"><input type="number" className="w-full min-w-[60px] p-2.5 bg-blue-50 border border-blue-200 rounded-lg text-center font-bold text-blue-900 outline-none focus:bg-white focus:ring-2 focus:ring-indigo-500 transition-all" value={entry.t2_total} onChange={e => handleScoreChange(i, 't2_total', e.target.value)}/></td>
                                             <td className="p-2 border-r border-gray-50"><input type="number" className="w-full min-w-[60px] p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-center font-medium focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all" value={entry.ca1} onChange={e => handleScoreChange(i, 'ca1', e.target.value)}/></td>
                                             <td className="p-2 border-r border-gray-50"><input type="number" className="w-full min-w-[60px] p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-center font-medium focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all" value={entry.ca2} onChange={e => handleScoreChange(i, 'ca2', e.target.value)}/></td>
                                             <td className="p-2 border-r border-gray-50"><input type="number" className="w-full min-w-[60px] p-2.5 bg-blue-50/50 border border-blue-200 rounded-lg text-center font-black text-blue-900 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all" value={entry.exam} onChange={e => handleScoreChange(i, 'exam', e.target.value)}/></td>

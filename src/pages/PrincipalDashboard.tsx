@@ -44,6 +44,10 @@ const PrincipalDashboard = () => {
   const [studentSearch, setStudentSearch] = useState("");
   const [studentClassFilter, setStudentClassFilter] = useState("All");
   const [teacherSearch, setTeacherSearch] = useState("");
+  
+  // NEW SEARCH STATES FOR BATCHES
+  const [pendingSearch, setPendingSearch] = useState("");
+  const [approvedSearch, setApprovedSearch] = useState("");
 
   const [staffForm, setStaffForm] = useState({ name: '', role: 'Teacher', email: '', password: '', section: 'Secondary', assigned_class: '' });
   const [studentForm, setStudentForm] = useState({ name: '', gender: '', admission_no: '', class: '', dob: '', parent_phone: '', parent_phone_2: '', password: '' });
@@ -75,16 +79,15 @@ const PrincipalDashboard = () => {
         setNewGlobalTerm(data.current_term);
     }
   };
-const updateGlobalSettings = async () => { 
+
+  const updateGlobalSettings = async () => { 
       if (!newGlobalSession || !newGlobalTerm) return toast.error("Please provide both session and term."); 
       setLoading(true); 
 
       try {
-          // 1. Dynamically fetch the actual ID of your settings row
           const { data: existingSettings } = await supabase.from('school_settings').select('id').limit(1).maybeSingle();
 
           if (existingSettings?.id) {
-              // 2. Update using the real ID we just found
               const { error } = await supabase.from('school_settings')
                   .update({ current_session: newGlobalSession, current_term: newGlobalTerm })
                   .eq('id', existingSettings.id);
@@ -203,8 +206,6 @@ const updateGlobalSettings = async () => {
       data.forEach(row => {
         const totalScore = Number(row.total_score) || 0;
         
-        // ULTIMATE FILTER: Only count the subject IF the total score is > 0
-        // This completely ignores ghost uploads, blanks, and nulls in the average calculation!
         if (totalScore > 0) {
             subjectsSet.add(row.subject);
             if (!studentsMap[row.student_id]) {
@@ -219,7 +220,7 @@ const updateGlobalSettings = async () => {
       setBroadsheetSubjects(Array.from(subjectsSet));
       
       const processedData = Object.values(studentsMap)
-        .filter((s: any) => s.subjectCount > 0) // Ensure we only map students with actual scores
+        .filter((s: any) => s.subjectCount > 0) 
         .map((s: any) => ({
           ...s,
           average: s.subjectCount > 0 ? Number((s.total / s.subjectCount).toFixed(1)) : 0
@@ -241,7 +242,6 @@ const updateGlobalSettings = async () => {
     broadsheetData.forEach((student, index) => {
       const row = [
         `"${student.name}"`, 
-        // Using !== undefined ensures missing subjects print as '-' 
         ...broadsheetSubjects.map(sub => student.scores[sub] !== undefined ? student.scores[sub] : '-'),
         student.total,
         student.average,
@@ -318,6 +318,19 @@ const updateGlobalSettings = async () => {
   });
 
   const filteredTeachers = teacherList.filter(t => t.full_name.toLowerCase().includes(teacherSearch.toLowerCase()) || t.email.toLowerCase().includes(teacherSearch.toLowerCase()));
+
+  // NEW FILTER LOGIC FOR BATCHES
+  const filteredPendingBatches = pendingBatches.filter(b => 
+    b.subject.toLowerCase().includes(pendingSearch.toLowerCase()) ||
+    b.class_level.toLowerCase().includes(pendingSearch.toLowerCase()) ||
+    b.teacher_name.toLowerCase().includes(pendingSearch.toLowerCase())
+  );
+
+  const filteredApprovedBatches = approvedBatches.filter(b => 
+    b.subject.toLowerCase().includes(approvedSearch.toLowerCase()) ||
+    b.class_level.toLowerCase().includes(approvedSearch.toLowerCase()) ||
+    b.teacher_name.toLowerCase().includes(approvedSearch.toLowerCase())
+  );
 
   const initiateBatchAction = (action: 'approve' | 'reject') => setConfirmAction(action);
   const executeBatchAction = async () => {
@@ -431,9 +444,14 @@ const updateGlobalSettings = async () => {
                   <span className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-xs font-bold">{pendingBatches.length} Batches Pending</span>
                </div>
                
-               {pendingBatches.length > 0 ? (
+               <div className="bg-white p-4 rounded-2xl shadow-sm border border-blue-100 flex items-center relative">
+                  <Search className="text-gray-400 absolute left-6" size={18} />
+                  <input type="text" placeholder="Search by class, subject, or teacher..." value={pendingSearch} onChange={e => setPendingSearch(e.target.value)} className="w-full pl-12 p-2 bg-transparent outline-none text-gray-700 font-medium" />
+               </div>
+               
+               {filteredPendingBatches.length > 0 ? (
                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                   {pendingBatches.map(batch => (
+                   {filteredPendingBatches.map(batch => (
                      <div key={batch.id} onClick={() => setSelectedBatch(batch)} className="bg-white border border-gray-200 p-6 rounded-2xl shadow-sm hover:shadow-md hover:border-blue-300 transition-all cursor-pointer group">
                        <div className="flex justify-between items-start mb-4">
                          <div className="w-12 h-12 rounded-xl bg-blue-50 flex items-center justify-center text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-colors"><FileCheck size={24} /></div>
@@ -451,7 +469,7 @@ const updateGlobalSettings = async () => {
                ) : (
                  <div className="bg-white p-12 text-center rounded-2xl border border-dashed border-gray-300 text-gray-400">
                    <CheckCircle size={48} className="mx-auto mb-3 opacity-20 text-blue-500"/>
-                   <p>No pending results.</p>
+                   <p>{pendingSearch ? "No batches match your search." : "No pending results."}</p>
                  </div>
                )}
              </div>
@@ -467,9 +485,14 @@ const updateGlobalSettings = async () => {
                   <span className="bg-green-100 text-green-800 px-3 py-1 rounded-full text-xs font-bold">{approvedBatches.length} Batches</span>
                </div>
                
-               {approvedBatches.length > 0 ? (
+               <div className="bg-white p-4 rounded-2xl shadow-sm border border-green-100 flex items-center relative">
+                  <Search className="text-gray-400 absolute left-6" size={18} />
+                  <input type="text" placeholder="Search by class, subject, or teacher..." value={approvedSearch} onChange={e => setApprovedSearch(e.target.value)} className="w-full pl-12 p-2 bg-transparent outline-none text-gray-700 font-medium" />
+               </div>
+
+               {filteredApprovedBatches.length > 0 ? (
                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                   {approvedBatches.map(batch => (
+                   {filteredApprovedBatches.map(batch => (
                      <div key={batch.id} onClick={() => setSelectedApprovedBatch(batch)} className="bg-white border border-gray-200 p-6 rounded-2xl shadow-sm hover:shadow-md hover:border-green-300 transition-all cursor-pointer group">
                        <div className="flex justify-between items-start mb-4">
                          <div className="w-12 h-12 rounded-xl bg-green-50 flex items-center justify-center text-green-600 group-hover:bg-green-600 group-hover:text-white transition-colors"><FileCheck size={24} /></div>
@@ -487,7 +510,7 @@ const updateGlobalSettings = async () => {
                ) : (
                  <div className="bg-white p-12 text-center rounded-2xl border border-dashed border-gray-300 text-gray-400">
                    <Archive size={48} className="mx-auto mb-3 opacity-20 text-gray-400"/>
-                   <p>No approved results to manage.</p>
+                   <p>{approvedSearch ? "No approved batches match your search." : "No approved results to manage."}</p>
                  </div>
                )}
              </div>
