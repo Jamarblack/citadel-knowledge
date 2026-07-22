@@ -10,17 +10,15 @@ const StudentLogin = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   
-  // Login States
+  
   const [studentId, setStudentId] = useState("");
   const [studentPin, setStudentPin] = useState("");
 
-  // Buy PIN States
   const [isBuyPinModalOpen, setIsBuyPinModalOpen] = useState(false);
   const [buyPinAdmissionNo, setBuyPinAdmissionNo] = useState("");
   const [foundStudentForPin, setFoundStudentForPin] = useState<any>(null);
   const [findingStudent, setFindingStudent] = useState(false);
   
-  // Payment & Reveal States
   const [virtualAccount, setVirtualAccount] = useState<any>(null);
   const [copied, setCopied] = useState(false);
   const [isWaitingForBank, setIsWaitingForBank] = useState(false);
@@ -112,13 +110,9 @@ const StudentLogin = () => {
       setTimeout(() => setCopied(false), 2000);
   };
 
-  // ==========================================
-  // THE MAGIC REALTIME LISTENER
-  // ==========================================
   useEffect(() => {
     if (!isWaitingForBank || !foundStudentForPin) return;
 
-    // Listen to the 'payments' table for a new row with this student's name
     const channel = supabase
       .channel('payment-listener')
       .on(
@@ -131,8 +125,7 @@ const StudentLogin = () => {
         },
         async (payload) => {
           console.log("Webhook fired! Database updated:", payload);
-          
-          // Payment confirmed! Now let's fetch their actual login PIN from the students table
+     
           const { data } = await supabase.from('students')
               .select('password_text')
               .eq('id', foundStudentForPin.id)
@@ -140,7 +133,7 @@ const StudentLogin = () => {
 
           if (data) {
              setRevealedPin(data.password_text);
-             setIsWaitingForBank(false); // Stop waiting
+             setIsWaitingForBank(false); 
              toast.success("Payment Received Successfully!");
           }
         }
@@ -302,12 +295,7 @@ const StudentLogin = () => {
                 {loading ? 'Authenticating...' : 'Access Result'} <ArrowRight size={18} />
               </button>
               
-              {/* <div className="mt-8 text-center border-t border-gray-100 pt-6">
-                <p className="text-sm font-medium text-gray-500 mb-3">Don't have a Result PIN yet?</p>
-                <button type="button" onClick={() => setIsBuyPinModalOpen(true)} className="text-sm font-bold text-gray-900 bg-yellow-400 hover:bg-yellow-500 px-6 py-3 rounded-xl flex items-center justify-center gap-2 mx-auto transition-colors shadow-sm w-full">
-                  <CreditCard size={18} /> Purchase PIN Online (₦1,000)
-                </button>
-              </div> */}
+            
             </form>
           </div>
         </div>
