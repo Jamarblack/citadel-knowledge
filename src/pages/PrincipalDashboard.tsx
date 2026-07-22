@@ -14,6 +14,22 @@ import logo from "/school-logo.png";
 
 type ResultBatch = { id: string; class_level: string; subject: string; teacher_name: string; student_count: number; results: any[]; };
 
+// Exact match list - avoids the ilike('%SS%') bug where "Pry 1 Progress" (a Primary
+// class arm literally named "Progress") false-matches because "Progress" contains "ss".
+const SECONDARY_CLASSES = ['JSS 1', 'JSS 2', 'JSS 3', 'SS 1', 'SS 2', 'SS 3'];
+
+// Secondary grade bands (mirrors the teacher app's secondary branch), used to compute
+// the grade from a live-recalculated average rather than trusting a possibly-stale
+// saved grade.
+const secondaryGrade = (score: number) => {
+  if (score >= 80) return 'A';
+  if (score >= 70) return 'B';
+  if (score >= 60) return 'C';
+  if (score >= 50) return 'D';
+  if (score >= 45) return 'E';
+  return 'F';
+};
+
 const PrincipalDashboard = () => {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState("overview");
@@ -45,7 +61,7 @@ const PrincipalDashboard = () => {
   const [studentClassFilter, setStudentClassFilter] = useState("All");
   const [teacherSearch, setTeacherSearch] = useState("");
   
-  // NEW SEARCH STATES FOR BATCHES
+  
   const [pendingSearch, setPendingSearch] = useState("");
   const [approvedSearch, setApprovedSearch] = useState("");
 
@@ -143,13 +159,13 @@ const PrincipalDashboard = () => {
   };
 
   const fetchStats = async () => {
-    const { count: sCount } = await supabase.from('students').select('*', { count: 'exact', head: true }).or('current_class.ilike.%SS%,current_class.ilike.%JSS%'); 
+    const { count: sCount } = await supabase.from('students').select('*', { count: 'exact', head: true }).in('current_class', SECONDARY_CLASSES); 
     const { count: tCount } = await supabase.from('staff').select('*', { count: 'exact', head: true }).eq('role', 'Teacher').eq('section', 'Secondary');
-    const { count: rCount } = await supabase.from('results').select('*', { count: 'exact', head: true }).eq('status', 'pending');
+    const { count: rCount } = await supabase.from('results').select('*', { count: 'exact', head: true }).eq('status', 'pending').in('class_level', SECONDARY_CLASSES);
     setStats({ students: sCount || 0, teachers: tCount || 0, pendingResults: rCount || 0 });
   };
   const fetchStudents = async () => {
-    const { data } = await supabase.from('students').select('*').or('current_class.ilike.%SS%,current_class.ilike.%JSS%').order('full_name', { ascending: true });
+    const { data } = await supabase.from('students').select('*').in('current_class', SECONDARY_CLASSES).order('full_name', { ascending: true });
     setStudentList(data || []);
   };
   const fetchTeachers = async () => {
@@ -159,11 +175,11 @@ const PrincipalDashboard = () => {
   
   const fetchPendingResults = async () => {
     try {
-      const { data } = await supabase.from('results').select('*').eq('status', 'pending').order('class_level');
+      const { data } = await supabase.from('results').select('*').eq('status', 'pending').in('class_level', SECONDARY_CLASSES).order('class_level').limit(5000);
       if (!data) return;
       const groups: { [key: string]: ResultBatch } = {};
       data.forEach((row) => {
-        if (!row || !row.class_level || (!row.class_level.includes('SS') && !row.class_level.includes('JSS'))) return; 
+        if (!row || !row.class_level) return; 
         
         const key = `${row.class_level}-${row.subject}`;
         if (!groups[key]) groups[key] = { id: key, class_level: row.class_level, subject: row.subject || 'Unknown Subject', teacher_name: row.teacher_name || 'Unknown', student_count: 0, results: [] };
@@ -175,11 +191,11 @@ const PrincipalDashboard = () => {
 
   const fetchApprovedResults = async () => {
     try {
-      const { data } = await supabase.from('results').select('*').eq('status', 'approved').order('class_level');
+      const { data } = await supabase.from('results').select('*').eq('status', 'approved').in('class_level', SECONDARY_CLASSES).order('class_level').limit(5000);
       if (!data) return;
       const groups: { [key: string]: ResultBatch } = {};
       data.forEach((row) => {
-        if (!row || !row.class_level || (!row.class_level.includes('SS') && !row.class_level.includes('JSS'))) return;
+        if (!row || !row.class_level) return;
         const key = `${row.class_level}-${row.subject}`;
         if (!groups[key]) groups[key] = { id: key, class_level: row.class_level, subject: row.subject || 'Unknown Subject', teacher_name: row.teacher_name || 'Unknown', student_count: 0, results: [] };
         groups[key].results.push(row); groups[key].student_count++;
@@ -319,7 +335,6 @@ const PrincipalDashboard = () => {
 
   const filteredTeachers = teacherList.filter(t => t.full_name.toLowerCase().includes(teacherSearch.toLowerCase()) || t.email.toLowerCase().includes(teacherSearch.toLowerCase()));
 
-  // NEW FILTER LOGIC FOR BATCHES
   const filteredPendingBatches = pendingBatches.filter(b => 
     b.subject.toLowerCase().includes(pendingSearch.toLowerCase()) ||
     b.class_level.toLowerCase().includes(pendingSearch.toLowerCase()) ||
@@ -373,6 +388,13 @@ const PrincipalDashboard = () => {
   const deleteStudent = async (id: string) => { if (!confirm("Delete this student?")) return; await supabase.from('students').delete().eq('id', id); toast.success("Deleted"); fetchStudents(); fetchStats(); };
   const deleteStaff = async (id: string) => { if (!confirm("Delete this teacher?")) return; await supabase.from('staff').delete().eq('id', id); toast.success("Deleted"); fetchTeachers(); fetchStats(); };
 
+ 
+  const isThirdTermSecondaryBatch = (batch: ResultBatch | null) => 
+    !!batch && globalSettings.term === '3rd Term' && SECONDARY_CLASSES.includes(batch.class_level);
+
+  const openPendingBatch = (batch: ResultBatch) => setSelectedBatch(batch);
+  const openApprovedBatch = (batch: ResultBatch) => setSelectedApprovedBatch(batch);
+
   const SidebarContent = () => (
     <div className="h-full flex flex-col text-white">
       <div className="p-8 text-center bg-[#0f172a] border-b border-gray-800">
@@ -415,13 +437,174 @@ const PrincipalDashboard = () => {
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in"><div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 animate-in zoom-in-95"><div className={`w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-4 ${confirmAction === 'approve' ? 'bg-blue-100 text-blue-600' : 'bg-red-100 text-red-600'}`}>{confirmAction === 'approve' ? <CheckCircle size={28} /> : <AlertTriangle size={28} />}</div><h3 className="text-xl font-bold text-center text-gray-900 mb-2">{confirmAction === 'approve' ? 'Approve Results?' : 'Reject Results?'}</h3><p className="text-center text-gray-500 text-sm mb-6">Are you sure you want to <strong>{confirmAction.toUpperCase()}</strong> the {selectedBatch.subject} results?</p><div className="grid grid-cols-2 gap-3"><button onClick={() => setConfirmAction(null)} className="py-3 px-4 rounded-xl border border-gray-200 font-bold text-gray-600 hover:bg-gray-50">Cancel</button><button onClick={executeBatchAction} disabled={loading} className={`py-3 px-4 rounded-xl font-bold text-white shadow-lg flex items-center justify-center gap-2 ${confirmAction === 'approve' ? 'bg-blue-600 hover:bg-blue-700' : 'bg-red-600 hover:bg-red-700'}`}>{loading ? 'Processing...' : `Yes, ${confirmAction === 'approve' ? 'Approve' : 'Reject'}`}</button></div></div></div>
       )}
 
-      {selectedBatch && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in"><div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95"><div className="bg-[#1e3a8a] p-6 text-white flex justify-between items-center shrink-0"><div><h2 className="text-xl font-bold flex items-center gap-2">{selectedBatch.class_level} - {selectedBatch.subject}</h2><p className="text-blue-200 text-sm">{selectedBatch.student_count} Students Submitted</p></div><button onClick={() => setSelectedBatch(null)} className="text-blue-200 hover:text-white"><XCircle size={28}/></button></div><div className="flex-1 overflow-y-auto p-6 bg-gray-50"><div className="bg-white border rounded-xl shadow-sm overflow-hidden"><table className="w-full text-left text-sm"><thead className="bg-gray-100 text-gray-700 font-bold border-b"><tr><th className="p-4">Student Name</th><th className="p-4 text-center">CA (40)</th><th className="p-4 text-center">Exam (60)</th><th className="p-4 text-center">Total (100)</th><th className="p-4 text-center">Grade</th></tr></thead><tbody className="divide-y">{selectedBatch.results.map((res: any) => (<tr key={res.id} className="hover:bg-blue-50/50"><td className="p-4 font-medium text-gray-900">{res.student_name}</td><td className="p-4 text-center text-gray-600">{(res.ca1_score||0) + (res.ca2_score||0)}</td><td className="p-4 text-center text-gray-600">{res.exam_score}</td><td className="p-4 text-center font-bold text-blue-900">{res.total_score}</td><td className={`p-4 text-center font-bold ${res.total_score < 40 ? 'text-red-500' : 'text-green-600'}`}>{res.grade}</td></tr>))}</tbody></table></div><div className="mt-8 flex justify-end"><div className="text-right border-t-2 border-gray-300 pt-2 px-4"><p className="text-xs text-gray-500 uppercase font-bold tracking-widest">Uploaded By</p><p className="text-lg font-serif font-bold text-[#1e3a8a]">{selectedBatch.teacher_name}</p><p className="text-xs text-gray-400 italic">Subject Teacher</p></div></div></div><div className="p-6 bg-white border-t flex justify-end gap-4 shrink-0"><button onClick={() => initiateBatchAction('reject')} disabled={loading} className="px-6 py-3 bg-red-100 text-red-700 font-bold rounded-xl hover:bg-red-200 transition-colors">Reject Batch</button><button onClick={() => initiateBatchAction('approve')} disabled={loading} className="px-6 py-3 bg-[#1e3a8a] text-white font-bold rounded-xl hover:bg-blue-900 shadow-lg transition-all flex items-center gap-2"><CheckCircle size={18}/> Approve Batch</button></div></div></div>
-      )}
+      {selectedBatch && (() => {
+        const showBreakdown = isThirdTermSecondaryBatch(selectedBatch);
+        return (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95">
+            <div className="bg-[#1e3a8a] p-6 text-white flex justify-between items-center shrink-0">
+              <div>
+                <h2 className="text-xl font-bold flex items-center gap-2">{selectedBatch.class_level} - {selectedBatch.subject}</h2>
+                <p className="text-blue-200 text-sm">{selectedBatch.student_count} Students Submitted{showBreakdown ? ' · 3rd Term Whole-Year Breakdown' : ''}</p>
+              </div>
+              <button onClick={() => setSelectedBatch(null)} className="text-blue-200 hover:text-white"><XCircle size={28}/></button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-6 bg-gray-50">
+              <div className="bg-white border rounded-xl shadow-sm overflow-x-auto">
+                <table className="w-full text-left text-sm whitespace-nowrap">
+                  <thead className="bg-gray-100 text-gray-700 font-bold border-b">
+                    <tr>
+                      <th className="p-4">Student Name</th>
+                      {showBreakdown ? (
+                        <>
+                          <th className="p-4 text-center bg-blue-50">1st Term</th>
+                          <th className="p-4 text-center bg-blue-50">2nd Term</th>
+                          <th className="p-4 text-center">3rd Term<br/>1st CA</th>
+                          <th className="p-4 text-center">3rd Term<br/>2nd CA</th>
+                          <th className="p-4 text-center">3rd Term<br/>Exam</th>
+                          <th className="p-4 text-center bg-gray-200">3rd Term<br/>Total</th>
+                          <th className="p-4 text-center text-blue-900">Average</th>
+                          <th className="p-4 text-center">Grade</th>
+                        </>
+                      ) : (
+                        <>
+                          <th className="p-4 text-center">CA (40)</th>
+                          <th className="p-4 text-center">Exam (60)</th>
+                          <th className="p-4 text-center">Total (100)</th>
+                          <th className="p-4 text-center">Grade</th>
+                        </>
+                      )}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {selectedBatch.results.map((res: any) => {
+                      const term3Total = (res.ca1_score || 0) + (res.ca2_score || 0) + (res.exam_score || 0);
+                      const liveAverage = Math.round((((res.t1_total||0) + (res.t2_total||0) + term3Total) / 3) * 100) / 100;
+                      const liveGrade = secondaryGrade(liveAverage);
+                      const mismatch = showBreakdown && Math.abs(liveAverage - (Number(res.total_score) || 0)) > 0.05;
+                      return (
+                        <tr key={res.id} className="hover:bg-blue-50/50">
+                          <td className="p-4 font-medium text-gray-900">{res.student_name}</td>
+                          {showBreakdown ? (
+                            <>
+                              <td className="p-4 text-center text-blue-900 font-bold bg-blue-50/50">{res.t1_total || 0}</td>
+                              <td className="p-4 text-center text-blue-900 font-bold bg-blue-50/50">{res.t2_total || 0}</td>
+                              <td className="p-4 text-center text-gray-600">{res.ca1_score}</td>
+                              <td className="p-4 text-center text-gray-600">{res.ca2_score}</td>
+                              <td className="p-4 text-center text-gray-600">{res.exam_score}</td>
+                              <td className="p-4 text-center font-bold text-gray-700 bg-gray-50">{term3Total}</td>
+                              <td className="p-4 text-center font-bold text-blue-900">
+                                {liveAverage}
+                                {mismatch && <span title={`Saved value was ${res.total_score} — teacher should resubmit`} className="ml-1 text-red-500 font-black cursor-help"></span>}
+                              </td>
+                              <td className={`p-4 text-center font-bold ${liveAverage < 40 ? 'text-red-500' : 'text-green-600'}`}>{liveGrade}</td>
+                            </>
+                          ) : (
+                            <>
+                              <td className="p-4 text-center text-gray-600">{(res.ca1_score||0) + (res.ca2_score||0)}</td>
+                              <td className="p-4 text-center text-gray-600">{res.exam_score}</td>
+                              <td className="p-4 text-center font-bold text-blue-900">{res.total_score}</td>
+                              <td className={`p-4 text-center font-bold ${res.total_score < 40 ? 'text-red-500' : 'text-green-600'}`}>{res.grade}</td>
+                            </>
+                          )}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <div className="mt-8 flex justify-end"><div className="text-right border-t-2 border-gray-300 pt-2 px-4"><p className="text-xs text-gray-500 uppercase font-bold tracking-widest">Uploaded By</p><p className="text-lg font-serif font-bold text-[#1e3a8a]">{selectedBatch.teacher_name}</p><p className="text-xs text-gray-400 italic">Subject Teacher</p></div></div>
+            </div>
+            <div className="p-6 bg-white border-t flex justify-end gap-4 shrink-0"><button onClick={() => initiateBatchAction('reject')} disabled={loading} className="px-6 py-3 bg-red-100 text-red-700 font-bold rounded-xl hover:bg-red-200 transition-colors">Reject Batch</button><button onClick={() => initiateBatchAction('approve')} disabled={loading} className="px-6 py-3 bg-[#1e3a8a] text-white font-bold rounded-xl hover:bg-blue-900 shadow-lg transition-all flex items-center gap-2"><CheckCircle size={18}/> Approve Batch</button></div>
+          </div>
+        </div>
+        );
+      })()}
 
-      {selectedApprovedBatch && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in"><div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95"><div className="bg-green-700 p-6 text-white flex justify-between items-center shrink-0"><div><h2 className="text-xl font-bold flex items-center gap-2">{selectedApprovedBatch.class_level} - {selectedApprovedBatch.subject} <span className="bg-white text-green-700 text-xs px-2 py-0.5 rounded-full font-black">APPROVED</span></h2><p className="text-green-100 text-sm">{selectedApprovedBatch.student_count} Results Managed</p></div><button onClick={() => setSelectedApprovedBatch(null)} className="text-green-100 hover:text-white"><XCircle size={28}/></button></div><div className="flex-1 overflow-y-auto p-6 bg-gray-50"><div className="bg-white border rounded-xl shadow-sm overflow-hidden"><table className="w-full text-left text-sm"><thead className="bg-gray-100 text-gray-700 font-bold border-b"><tr><th className="p-4">Student Name</th><th className="p-4 text-center">CA</th><th className="p-4 text-center">Exam</th><th className="p-4 text-center">Total</th><th className="p-4 text-center">Grade</th><th className="p-4 text-center">Action</th></tr></thead><tbody className="divide-y">{selectedApprovedBatch.results.map((res: any) => (<tr key={res.id} className="hover:bg-gray-50"><td className="p-4 font-medium text-gray-900">{res.student_name}</td><td className="p-4 text-center text-gray-600">{(res.ca1_score||0) + (res.ca2_score||0)}</td><td className="p-4 text-center text-gray-600">{res.exam_score}</td><td className="p-4 text-center font-bold text-green-700">{res.total_score}</td><td className={`p-4 text-center font-bold ${res.total_score < 40 ? 'text-red-500' : 'text-green-600'}`}>{res.grade}</td><td className="p-4 text-center"><button onClick={() => deleteSingleResult(res.id)} className="text-red-400 hover:text-red-600 hover:bg-red-50 p-2 rounded"><Trash2 size={16} /></button></td></tr>))}</tbody></table></div></div><div className="p-6 bg-red-50 border-t border-red-100 flex justify-between items-center shrink-0"><p className="text-xs text-red-400 max-w-sm">Warning: Deleting the batch removes all results permanently.</p><button onClick={() => deleteBatchResults(selectedApprovedBatch)} disabled={loading} className="px-6 py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 shadow flex items-center gap-2"><Trash2 size={18}/> Delete Entire Batch</button></div></div></div>
-      )}
+      {selectedApprovedBatch && (() => {
+        const showBreakdown = isThirdTermSecondaryBatch(selectedApprovedBatch);
+        return (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95">
+            <div className="bg-green-700 p-6 text-white flex justify-between items-center shrink-0">
+              <div>
+                <h2 className="text-xl font-bold flex items-center gap-2">{selectedApprovedBatch.class_level} - {selectedApprovedBatch.subject} <span className="bg-white text-green-700 text-xs px-2 py-0.5 rounded-full font-black">APPROVED</span></h2>
+                <p className="text-green-100 text-sm">{selectedApprovedBatch.student_count} Results Managed{showBreakdown ? ' · 3rd Term Whole-Year Breakdown' : ''}</p>
+              </div>
+              <button onClick={() => setSelectedApprovedBatch(null)} className="text-green-100 hover:text-white"><XCircle size={28}/></button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-6 bg-gray-50">
+              <div className="bg-white border rounded-xl shadow-sm overflow-x-auto">
+                <table className="w-full text-left text-sm whitespace-nowrap">
+                  <thead className="bg-gray-100 text-gray-700 font-bold border-b">
+                    <tr>
+                      <th className="p-4">Student Name</th>
+                      {showBreakdown ? (
+                        <>
+                          <th className="p-4 text-center bg-blue-50">1st Term</th>
+                          <th className="p-4 text-center bg-blue-50">2nd Term</th>
+                          <th className="p-4 text-center">3rd Term<br/>1st CA</th>
+                          <th className="p-4 text-center">3rd Term<br/>2nd CA</th>
+                          <th className="p-4 text-center">3rd Term<br/>Exam</th>
+                          <th className="p-4 text-center bg-gray-200">3rd Term<br/>Total</th>
+                          <th className="p-4 text-center text-green-700">Average</th>
+                          <th className="p-4 text-center">Grade</th>
+                        </>
+                      ) : (
+                        <>
+                          <th className="p-4 text-center">CA</th>
+                          <th className="p-4 text-center">Exam</th>
+                          <th className="p-4 text-center">Total</th>
+                          <th className="p-4 text-center">Grade</th>
+                        </>
+                      )}
+                      <th className="p-4 text-center">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {selectedApprovedBatch.results.map((res: any) => {
+                      const term3Total = (res.ca1_score || 0) + (res.ca2_score || 0) + (res.exam_score || 0);
+                      const liveAverage = Math.round((((res.t1_total||0) + (res.t2_total||0) + term3Total) / 3) * 10) / 10;
+                      const liveGrade = secondaryGrade(liveAverage);
+                      const mismatch = showBreakdown && Math.abs(liveAverage - (Number(res.total_score) || 0)) > 0.05;
+                      return (
+                        <tr key={res.id} className="hover:bg-gray-50">
+                          <td className="p-4 font-medium text-gray-900">{res.student_name}</td>
+                          {showBreakdown ? (
+                            <>
+                              <td className="p-4 text-center text-blue-900 font-bold bg-blue-50/50">{res.t1_total || 0}</td>
+                              <td className="p-4 text-center text-blue-900 font-bold bg-blue-50/50">{res.t2_total || 0}</td>
+                              <td className="p-4 text-center text-gray-600">{res.ca1_score}</td>
+                              <td className="p-4 text-center text-gray-600">{res.ca2_score}</td>
+                              <td className="p-4 text-center text-gray-600">{res.exam_score}</td>
+                              <td className="p-4 text-center font-bold text-gray-700 bg-gray-50">{term3Total}</td>
+                              <td className="p-4 text-center font-bold text-green-700">
+                                {liveAverage}
+                                {mismatch && <span title={`Saved value was ${res.total_score} — teacher should resubmit`} className="ml-1 text-red-500 font-black cursor-help">⚠</span>}
+                              </td>
+                              <td className={`p-4 text-center font-bold ${liveAverage < 40 ? 'text-red-500' : 'text-green-600'}`}>{liveGrade}</td>
+                            </>
+                          ) : (
+                            <>
+                              <td className="p-4 text-center text-gray-600">{(res.ca1_score||0) + (res.ca2_score||0)}</td>
+                              <td className="p-4 text-center text-gray-600">{res.exam_score}</td>
+                              <td className="p-4 text-center font-bold text-green-700">{res.total_score}</td>
+                              <td className={`p-4 text-center font-bold ${res.total_score < 40 ? 'text-red-500' : 'text-green-600'}`}>{res.grade}</td>
+                            </>
+                          )}
+                          <td className="p-4 text-center"><button onClick={() => deleteSingleResult(res.id)} className="text-red-400 hover:text-red-600 hover:bg-red-50 p-2 rounded"><Trash2 size={16} /></button></td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <div className="p-6 bg-red-50 border-t border-red-100 flex justify-between items-center shrink-0"><p className="text-xs text-red-400 max-w-sm">Warning: Deleting the batch removes all results permanently.</p><button onClick={() => deleteBatchResults(selectedApprovedBatch)} disabled={loading} className="px-6 py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 shadow flex items-center gap-2"><Trash2 size={18}/> Delete Entire Batch</button></div>
+          </div>
+        </div>
+        );
+      })()}
 
       <aside className="hidden lg:block w-72 bg-[#0f172a] shadow-xl sticky top-0 h-screen z-30"><SidebarContent /></aside>
       <Sheet open={isMobileMenuOpen} onOpenChange={setIsMobileMenuOpen}><SheetContent side="left" className="p-0 w-72 bg-[#0f172a] border-none"><SidebarContent /></SheetContent></Sheet>
@@ -452,7 +635,7 @@ const PrincipalDashboard = () => {
                {filteredPendingBatches.length > 0 ? (
                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                    {filteredPendingBatches.map(batch => (
-                     <div key={batch.id} onClick={() => setSelectedBatch(batch)} className="bg-white border border-gray-200 p-6 rounded-2xl shadow-sm hover:shadow-md hover:border-blue-300 transition-all cursor-pointer group">
+                     <div key={batch.id} onClick={() => openPendingBatch(batch)} className="bg-white border border-gray-200 p-6 rounded-2xl shadow-sm hover:shadow-md hover:border-blue-300 transition-all cursor-pointer group">
                        <div className="flex justify-between items-start mb-4">
                          <div className="w-12 h-12 rounded-xl bg-blue-50 flex items-center justify-center text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-colors"><FileCheck size={24} /></div>
                          <span className="text-xs font-bold bg-orange-100 text-orange-700 px-2 py-1 rounded">Pending</span>
@@ -493,7 +676,7 @@ const PrincipalDashboard = () => {
                {filteredApprovedBatches.length > 0 ? (
                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                    {filteredApprovedBatches.map(batch => (
-                     <div key={batch.id} onClick={() => setSelectedApprovedBatch(batch)} className="bg-white border border-gray-200 p-6 rounded-2xl shadow-sm hover:shadow-md hover:border-green-300 transition-all cursor-pointer group">
+                     <div key={batch.id} onClick={() => openApprovedBatch(batch)} className="bg-white border border-gray-200 p-6 rounded-2xl shadow-sm hover:shadow-md hover:border-green-300 transition-all cursor-pointer group">
                        <div className="flex justify-between items-start mb-4">
                          <div className="w-12 h-12 rounded-xl bg-green-50 flex items-center justify-center text-green-600 group-hover:bg-green-600 group-hover:text-white transition-colors"><FileCheck size={24} /></div>
                          <span className="text-xs font-bold bg-green-100 text-green-700 px-2 py-1 rounded">Approved</span>
