@@ -33,13 +33,11 @@ const StaffLogin = () => {
         throw new Error("Invalid email or password");
       }
 
-      // 2. Save Session
       localStorage.setItem('staffId', data.id);
-      localStorage.setItem('role', data.role); // 'Principal', 'Teacher', 'Bursar', etc.
+      localStorage.setItem('role', data.role); 
 
       toast.success(`Welcome back, ${data.full_name}!`);
 
-    // 3. Redirect based on Role
 if (data.role === 'Proprietor') {
   navigate('/proprietor-dashboard');
 } else if (data.role === 'Proprietress') {

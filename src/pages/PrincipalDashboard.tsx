@@ -14,13 +14,13 @@ import logo from "/school-logo.png";
 
 type ResultBatch = { id: string; class_level: string; subject: string; teacher_name: string; student_count: number; results: any[]; };
 
-// Exact match list - avoids the ilike('%SS%') bug where "Pry 1 Progress" (a Primary
-// class arm literally named "Progress") false-matches because "Progress" contains "ss".
-const SECONDARY_CLASSES = ['JSS 1', 'JSS 2', 'JSS 3', 'SS 1', 'SS 2', 'SS 3'];
 
-// Secondary grade bands (mirrors the teacher app's secondary branch), used to compute
-// the grade from a live-recalculated average rather than trusting a possibly-stale
-// saved grade.
+const SECONDARY_CLASSES = ['JSS 1', 'JSS 2', 'JSS 3', 'SS 1', 'SS 2', 'SS 3'];
+const JUNIOR_CLASSES = ['JSS 1', 'JSS 2', 'JSS 3'];
+const JSS_SUBJECT_COUNT = 16;
+const JSS_MAX_TOTAL = JSS_SUBJECT_COUNT * 100; // 1600
+
+
 const secondaryGrade = (score: number) => {
   if (score >= 80) return 'A';
   if (score >= 70) return 'B';
@@ -72,6 +72,7 @@ const PrincipalDashboard = () => {
 
   const [broadsheetData, setBroadsheetData] = useState<any[]>([]);
   const [broadsheetClass, setBroadsheetClass] = useState("");
+  const [broadsheetTerm, setBroadsheetTerm] = useState("");
   const [broadsheetSubjects, setBroadsheetSubjects] = useState<string[]>([]);
   const [loadingBroadsheet, setLoadingBroadsheet] = useState(false);
   const [formTeacherName, setFormTeacherName] = useState(""); 
@@ -204,14 +205,21 @@ const PrincipalDashboard = () => {
     } catch (err) { console.error(err); }
   };
 
+  useEffect(() => {
+    if (globalSettings.term && !broadsheetTerm) setBroadsheetTerm(globalSettings.term);
+  }, [globalSettings.term]);
+
   const fetchBroadsheet = async () => {
     if (!broadsheetClass) return toast.error("Please select a class first.");
+    if (!broadsheetTerm) return toast.error("Please select a term first.");
     setLoadingBroadsheet(true);
 
     const { data: formTeacher } = await supabase.from('staff').select('full_name').eq('assigned_class', broadsheetClass).maybeSingle();
     setFormTeacherName(formTeacher?.full_name || 'Class Teacher');
 
-    const { data, error } = await supabase.from('results').select('*').eq('class_level', broadsheetClass).eq('status', 'approved');
+    const isJunior = JUNIOR_CLASSES.includes(broadsheetClass);
+
+    const { data, error } = await supabase.from('results').select('*').eq('class_level', broadsheetClass).eq('status', 'approved').eq('term', broadsheetTerm).eq('session', globalSettings.session);
     
     if (error) {
       toast.error("Failed to load broadsheet.");
@@ -225,21 +233,28 @@ const PrincipalDashboard = () => {
         if (totalScore > 0) {
             subjectsSet.add(row.subject);
             if (!studentsMap[row.student_id]) {
-              studentsMap[row.student_id] = { id: row.student_id, name: row.student_name, total: 0, subjectCount: 0, scores: {} };
+              studentsMap[row.student_id] = { id: row.student_id, name: row.student_name, total: 0, subjectCount: 0, scores: {}, t1Total: 0, t2Total: 0, term3Total: 0 };
             }
             studentsMap[row.student_id].scores[row.subject] = totalScore;
             studentsMap[row.student_id].total += totalScore;
             studentsMap[row.student_id].subjectCount += 1; 
+         
+            studentsMap[row.student_id].t1Total += Number(row.t1_total) || 0;
+            studentsMap[row.student_id].t2Total += Number(row.t2_total) || 0;
+            studentsMap[row.student_id].term3Total += (Number(row.ca1_score) || 0) + (Number(row.ca2_score) || 0) + (Number(row.exam_score) || 0);
         }
       });
 
       setBroadsheetSubjects(Array.from(subjectsSet));
       
+   
       const processedData = Object.values(studentsMap)
         .filter((s: any) => s.subjectCount > 0) 
         .map((s: any) => ({
           ...s,
-          average: s.subjectCount > 0 ? Number((s.total / s.subjectCount).toFixed(1)) : 0
+          average: isJunior
+            ? Number(((s.total / JSS_MAX_TOTAL) * 100).toFixed(1))
+            : (s.subjectCount > 0 ? Number((s.total / s.subjectCount).toFixed(1)) : 0)
       })).sort((a: any, b: any) => b.average - a.average);
 
       setBroadsheetData(processedData);
@@ -251,17 +266,23 @@ const PrincipalDashboard = () => {
 
   const downloadBroadsheet = () => {
     if (broadsheetData.length === 0) return;
+    const isJunior = JUNIOR_CLASSES.includes(broadsheetClass);
+    const isThirdTerm = broadsheetTerm === '3rd Term';
     
-    const headers = ['Student Name', ...broadsheetSubjects, 'Total Score', 'Average (%)', 'Position'];
+    const headers = [
+      'Student Name', ...broadsheetSubjects,
+      ...(isThirdTerm ? ['1st Term Total', '2nd Term Total', '3rd Term Total'] : ['Total Score']),
+      'Average (%)', ...(isJunior ? ['Position'] : [])
+    ];
     let csvContent = headers.join(',') + '\n';
 
     broadsheetData.forEach((student, index) => {
       const row = [
         `"${student.name}"`, 
         ...broadsheetSubjects.map(sub => student.scores[sub] !== undefined ? student.scores[sub] : '-'),
-        student.total,
+        ...(isThirdTerm ? [student.t1Total, student.t2Total, student.term3Total] : [student.total]),
         student.average,
-        index + 1
+        ...(isJunior ? [index + 1] : [])
       ];
       csvContent += row.join(',') + '\n';
     });
@@ -388,7 +409,7 @@ const PrincipalDashboard = () => {
   const deleteStudent = async (id: string) => { if (!confirm("Delete this student?")) return; await supabase.from('students').delete().eq('id', id); toast.success("Deleted"); fetchStudents(); fetchStats(); };
   const deleteStaff = async (id: string) => { if (!confirm("Delete this teacher?")) return; await supabase.from('staff').delete().eq('id', id); toast.success("Deleted"); fetchTeachers(); fetchStats(); };
 
- 
+
   const isThirdTermSecondaryBatch = (batch: ResultBatch | null) => 
     !!batch && globalSettings.term === '3rd Term' && SECONDARY_CLASSES.includes(batch.class_level);
 
@@ -729,11 +750,21 @@ const PrincipalDashboard = () => {
                     <option value="">-- Select Class to Generate --</option>
                     {getClassOptions().filter(c=>!c.includes('Graduated')).map(c => <option key={c} value={c}>{c}</option>)}
                  </select>
+                 <select value={broadsheetTerm} onChange={e => { setBroadsheetTerm(e.target.value); setBroadsheetData([]); }} className="w-full sm:w-48 p-3 bg-gray-50 border border-gray-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-600 font-bold text-blue-900">
+                    <option>1st Term</option><option>2nd Term</option><option>3rd Term</option>
+                 </select>
                  <button onClick={fetchBroadsheet} disabled={loadingBroadsheet} className="w-full sm:w-auto px-8 py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition-all shadow-md flex items-center justify-center gap-2">
                    {loadingBroadsheet ? <RefreshCw className="animate-spin" size={18}/> : <FileText size={18}/>}
                    {loadingBroadsheet ? 'Generating...' : 'Preview Broadsheet'}
                  </button>
               </div>
+              {broadsheetClass && (
+                <p className="text-xs text-gray-400 print-hide -mt-2">
+                  {JUNIOR_CLASSES.includes(broadsheetClass)
+                    ? `Junior Secondary average is calculated over the standard ${JSS_SUBJECT_COUNT} subjects (Total ÷ ${JSS_MAX_TOTAL}), so it stays accurate even before every subject is approved.`
+                    : `Senior Secondary average is calculated only over this student's own uploaded subjects (electives vary per student), so there's no class-wide position.`}
+                </p>
+              )}
 
               {broadsheetData.length > 0 && (
                 <div id="broadsheet-print-area" className="bg-white p-6 md:p-10 rounded-2xl shadow-sm border border-blue-100 relative">
@@ -745,7 +776,7 @@ const PrincipalDashboard = () => {
                      
                      <div className="flex flex-wrap justify-center gap-4 md:gap-12 mt-6 text-sm font-bold text-[#1e3a8a] bg-blue-50 py-3 px-6 rounded-xl border border-blue-100 w-fit mx-auto">
                         <span>CLASS: <span className="text-gray-700">{broadsheetClass}</span></span>
-                        <span>TERM: <span className="text-gray-700">{globalSettings?.term}</span></span>
+                        <span>TERM: <span className="text-gray-700">{broadsheetTerm}</span></span>
                         <span>SESSION: <span className="text-gray-700">{globalSettings?.session}</span></span>
                      </div>
                   </div>
@@ -756,9 +787,17 @@ const PrincipalDashboard = () => {
                         <tr>
                           <th className="p-3 border border-gray-300 sticky left-0 bg-[#1e3a8a] z-10">Student Name</th>
                           {broadsheetSubjects.map(sub => <th key={sub} className="p-3 border border-gray-300 text-center">{sub.substring(0, 8)}.</th>)}
-                          <th className="p-3 font-bold text-yellow-300 border border-gray-300 text-center bg-blue-900">Total</th>
+                          {broadsheetTerm === '3rd Term' ? (
+                            <>
+                              <th className="p-3 font-bold text-blue-100 border border-gray-300 text-center bg-blue-800">1st Term<br/>Total</th>
+                              <th className="p-3 font-bold text-blue-100 border border-gray-300 text-center bg-blue-800">2nd Term<br/>Total</th>
+                              <th className="p-3 font-bold text-yellow-300 border border-gray-300 text-center bg-blue-900">3rd Term<br/>Total</th>
+                            </>
+                          ) : (
+                            <th className="p-3 font-bold text-yellow-300 border border-gray-300 text-center bg-blue-900">Total</th>
+                          )}
                           <th className="p-3 font-bold text-green-300 border border-gray-300 text-center bg-blue-900">Avg (%)</th>
-                          <th className="p-3 font-bold text-orange-300 border border-gray-300 text-center bg-blue-900">Pos</th>
+                          {JUNIOR_CLASSES.includes(broadsheetClass) && <th className="p-3 font-bold text-orange-300 border border-gray-300 text-center bg-blue-900">Pos</th>}
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-200">
@@ -768,11 +807,21 @@ const PrincipalDashboard = () => {
                              {broadsheetSubjects.map(sub => (
                                <td key={sub} className="p-3 text-gray-600 border border-gray-300 text-center font-medium">{student.scores[sub] !== undefined ? student.scores[sub] : <span className="text-gray-300">-</span>}</td>
                              ))}
-                             <td className="p-3 font-bold text-blue-900 bg-blue-50/50 border border-gray-300 text-center">{student.total}</td>
+                             {broadsheetTerm === '3rd Term' ? (
+                               <>
+                                 <td className="p-3 font-bold text-blue-900 bg-blue-50/50 border border-gray-300 text-center">{student.t1Total}</td>
+                                 <td className="p-3 font-bold text-blue-900 bg-blue-50/50 border border-gray-300 text-center">{student.t2Total}</td>
+                                 <td className="p-3 font-bold text-blue-900 bg-blue-50/50 border border-gray-300 text-center">{student.term3Total}</td>
+                               </>
+                             ) : (
+                               <td className="p-3 font-bold text-blue-900 bg-blue-50/50 border border-gray-300 text-center">{student.total}</td>
+                             )}
                              <td className="p-3 font-bold text-green-700 bg-green-50/50 border border-gray-300 text-center">{student.average}%</td>
-                             <td className="p-3 font-bold text-orange-700 bg-orange-50/50 border border-gray-300 text-center">
-                                {index + 1}<sup className="text-[10px] ml-0.5 text-gray-500">{index + 1 === 1 ? 'st' : index + 1 === 2 ? 'nd' : index + 1 === 3 ? 'rd' : 'th'}</sup>
-                             </td>
+                             {JUNIOR_CLASSES.includes(broadsheetClass) && (
+                               <td className="p-3 font-bold text-orange-700 bg-orange-50/50 border border-gray-300 text-center">
+                                  {index + 1}<sup className="text-[10px] ml-0.5 text-gray-500">{index + 1 === 1 ? 'st' : index + 1 === 2 ? 'nd' : index + 1 === 3 ? 'rd' : 'th'}</sup>
+                               </td>
+                             )}
                            </tr>
                          ))}
                       </tbody>

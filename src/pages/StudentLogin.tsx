@@ -298,7 +298,14 @@ const StudentLogin = () => {
             
             </form>
           </div>
+          <div className="mt-8 text-center">
+            <a href="/" className="text-sm font-bold text-gray-400 hover:text-[#2c0a0e] transition-colors">
+              ← Back to Home
+            </a>
+          </div>
+
         </div>
+        
       </div>
     </div>
   );
