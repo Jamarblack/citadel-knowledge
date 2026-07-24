@@ -17,9 +17,8 @@ type ResultBatch = { id: string; class_level: string; subject: string; teacher_n
 
 const SECONDARY_CLASSES = ['JSS 1', 'JSS 2', 'JSS 3', 'SS 1', 'SS 2', 'SS 3'];
 const JUNIOR_CLASSES = ['JSS 1', 'JSS 2', 'JSS 3'];
-const JSS_SUBJECT_COUNT = 16;
-const JSS_MAX_TOTAL = JSS_SUBJECT_COUNT * 100; // 1600
-
+const JSS_SUBJECT_COUNT = 15;
+const JSS_MAX_TOTAL = JSS_SUBJECT_COUNT * 100; 
 
 const secondaryGrade = (score: number) => {
   if (score >= 80) return 'A';
@@ -238,7 +237,7 @@ const PrincipalDashboard = () => {
             studentsMap[row.student_id].scores[row.subject] = totalScore;
             studentsMap[row.student_id].total += totalScore;
             studentsMap[row.student_id].subjectCount += 1; 
-         
+    
             studentsMap[row.student_id].t1Total += Number(row.t1_total) || 0;
             studentsMap[row.student_id].t2Total += Number(row.t2_total) || 0;
             studentsMap[row.student_id].term3Total += (Number(row.ca1_score) || 0) + (Number(row.ca2_score) || 0) + (Number(row.exam_score) || 0);
@@ -247,15 +246,21 @@ const PrincipalDashboard = () => {
 
       setBroadsheetSubjects(Array.from(subjectsSet));
       
-   
+      const isThirdTerm = broadsheetTerm === '3rd Term';
+
       const processedData = Object.values(studentsMap)
         .filter((s: any) => s.subjectCount > 0) 
-        .map((s: any) => ({
-          ...s,
-          average: isJunior
-            ? Number(((s.total / JSS_MAX_TOTAL) * 100).toFixed(1))
-            : (s.subjectCount > 0 ? Number((s.total / s.subjectCount).toFixed(1)) : 0)
-      })).sort((a: any, b: any) => b.average - a.average);
+        .map((s: any) => {
+          const yearSum = isThirdTerm ? (s.t1Total + s.t2Total + s.term3Total) : null;
+          const average = isThirdTerm
+            ? (isJunior
+                ? Number(((yearSum! / (3 * JSS_MAX_TOTAL)) * 100).toFixed(1))
+                : (s.subjectCount > 0 ? Number((yearSum! / (3 * s.subjectCount)).toFixed(1)) : 0))
+            : (isJunior
+                ? Number(((s.total / JSS_MAX_TOTAL) * 100).toFixed(1))
+                : (s.subjectCount > 0 ? Number((s.total / s.subjectCount).toFixed(1)) : 0));
+          return { ...s, average };
+      }).sort((a: any, b: any) => b.average - a.average);
 
       setBroadsheetData(processedData);
       if(processedData.length > 0) toast.success("Broadsheet Generated!");
@@ -410,6 +415,7 @@ const PrincipalDashboard = () => {
   const deleteStaff = async (id: string) => { if (!confirm("Delete this teacher?")) return; await supabase.from('staff').delete().eq('id', id); toast.success("Deleted"); fetchTeachers(); fetchStats(); };
 
 
+
   const isThirdTermSecondaryBatch = (batch: ResultBatch | null) => 
     !!batch && globalSettings.term === '3rd Term' && SECONDARY_CLASSES.includes(batch.class_level);
 
@@ -500,7 +506,7 @@ const PrincipalDashboard = () => {
                   <tbody className="divide-y">
                     {selectedBatch.results.map((res: any) => {
                       const term3Total = (res.ca1_score || 0) + (res.ca2_score || 0) + (res.exam_score || 0);
-                      const liveAverage = Math.round((((res.t1_total||0) + (res.t2_total||0) + term3Total) / 3) * 100) / 100;
+                      const liveAverage = Math.round((((res.t1_total||0) + (res.t2_total||0) + term3Total) / 3) * 10) / 10;
                       const liveGrade = secondaryGrade(liveAverage);
                       const mismatch = showBreakdown && Math.abs(liveAverage - (Number(res.total_score) || 0)) > 0.05;
                       return (
@@ -516,7 +522,7 @@ const PrincipalDashboard = () => {
                               <td className="p-4 text-center font-bold text-gray-700 bg-gray-50">{term3Total}</td>
                               <td className="p-4 text-center font-bold text-blue-900">
                                 {liveAverage}
-                                {mismatch && <span title={`Saved value was ${res.total_score} — teacher should resubmit`} className="ml-1 text-red-500 font-black cursor-help"></span>}
+                                {mismatch && <span title={`Saved value was ${res.total_score} — teacher should resubmit`} className="ml-1 text-red-500 font-black cursor-help">⚠</span>}
                               </td>
                               <td className={`p-4 text-center font-bold ${liveAverage < 40 ? 'text-red-500' : 'text-green-600'}`}>{liveGrade}</td>
                             </>
